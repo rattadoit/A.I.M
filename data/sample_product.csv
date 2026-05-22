@@ -1,0 +1,11 @@
+﻿product_id,product_name,category,shelf_life_type,disposal_risk,unit_price
+P01,도시락,식사,FF,HIGH,4800
+P02,아메리카노,음료,DRY,LOW,2000
+P03,우산,잡화,DRY,LOW,6000
+P04,생수,음료,DRY,LOW,1000
+P05,얼음컵,음료,FF,MEDIUM,800
+P06,컵라면,식사,DRY,LOW,1500
+P07,샌드위치,식사,FF,HIGH,2900
+P08,맥주,주류,DRY,LOW,3500
+P09,아이스크림,간식,FF,MEDIUM,1200
+P10,핫바,간식,FF,MEDIUM,2200
