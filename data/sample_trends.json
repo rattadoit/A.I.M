@@ -1,0 +1,66 @@
+{
+  "S001": {
+    "signals": [
+      {
+        "signal_id": "trend-001",
+        "platform": "tiktok",
+        "topic": "얼음컵 챌린지",
+        "trend_score": 0.85,
+        "freshness_hours": 12,
+        "linked_categories": ["음료"],
+        "linked_product_ids": ["P05"],
+        "trend_uplift": 0.08,
+        "summary": "틱톡에서 얼음컵 조합 영상 급증, 주말 수요 상승 예상",
+        "source_post_ids": ["mock_tt_1"],
+        "filtered_reason": "latest_high_trend"
+      },
+      {
+        "signal_id": "trend-002",
+        "platform": "instagram",
+        "topic": "편의점 아메리카노 토픽",
+        "trend_score": 0.72,
+        "freshness_hours": 24,
+        "linked_categories": ["음료"],
+        "linked_product_ids": ["P02"],
+        "trend_uplift": 0.05,
+        "summary": "인스타그램에서 아이스 아메리카노 리뷰 증가",
+        "source_post_ids": ["mock_ig_1"],
+        "filtered_reason": "latest_high_trend"
+      }
+    ]
+  },
+  "S002": {
+    "signals": [
+      {
+        "signal_id": "trend-003",
+        "platform": "x",
+        "topic": "여의도 야근 컵라면",
+        "trend_score": 0.78,
+        "freshness_hours": 18,
+        "linked_categories": ["식사"],
+        "linked_product_ids": ["P06"],
+        "trend_uplift": 0.06,
+        "summary": "X에서 오피스 상권 컵라면 언급 증가",
+        "source_post_ids": ["mock_x_1"],
+        "filtered_reason": "latest_high_trend"
+      }
+    ]
+  },
+  "S003": {
+    "signals": [
+      {
+        "signal_id": "trend-004",
+        "platform": "tiktok",
+        "topic": "집콕 간식",
+        "trend_score": 0.81,
+        "freshness_hours": 8,
+        "linked_categories": ["간식"],
+        "linked_product_ids": ["P09", "P10"],
+        "trend_uplift": 0.07,
+        "summary": "주거 상권 야식·간식 트렌드",
+        "source_post_ids": ["mock_tt_2"],
+        "filtered_reason": "latest_high_trend"
+      }
+    ]
+  }
+}

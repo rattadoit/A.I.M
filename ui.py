@@ -2,8 +2,9 @@ import streamlit as st
 import datetime
 import pandas as pd
 import plotly.graph_objects as go
-from config import WEATHER_OPTIONS, DISTRICT_OPTIONS
+from config import WEATHER_OPTIONS, DISTRICT_OPTIONS, REASON_CODES, SETTINGS
 from database import save_recommendation_feedback, get_feedback_history, get_feedback_metrics
+from services.backtest_service import run_backtest
 
 def render_html(html_str):
     cleaned = "".join([line.strip() for line in html_str.split("\n")])
@@ -129,8 +130,19 @@ def render_kpi(forecast_df):
         </div>
         """)
 
+def _export_order_csv(date_str, store_id, edited_df):
+    out = edited_df[["id", "adjusted_order"]].copy()
+    out.columns = ["product_id", "owner_adjusted_qty"]
+    out.insert(0, "date", date_str)
+    out.insert(1, "store_id", store_id)
+    return out.to_csv(index=False).encode("utf-8-sig")
+
+
 def render_product_table(forecast_df, date_str, store_id):
     st.markdown('<div class="sec-title">📋 상품별 예측 상세 정보 및 발주 수량 조정</div>', unsafe_allow_html=True)
+
+    if "adjust_reason_code" not in st.session_state:
+        st.session_state.adjust_reason_code = ""
     
     # 1. Prepare display DataFrame for Streamlit Editor
     display_df = forecast_df.copy()
@@ -142,35 +154,46 @@ def render_product_table(forecast_df, date_str, store_id):
     display_df["adjusted_order"] = display_df["id"].map(st.session_state.adjusted_order)
     
     # Format columns for nice reading
-    display_df_viewer = display_df[[
-        "id", "category", "name", "current_stock", "safety_stock", 
-        "ml_expected", "rule_expected", "recommended_order", "adjusted_order", "status"
-    ]]
+    cols = [
+        "id", "category", "name", "current_stock", "safety_stock",
+        "ml_expected", "rule_expected", "recommended_order", "adjusted_order", "status",
+    ]
+    if "sns_uplift" in display_df.columns:
+        display_df["sns_pct"] = (display_df["sns_uplift"] * 100).round(0).astype(int)
+        display_df["evt_pct"] = (display_df["event_uplift"] * 100).round(0).astype(int)
+        cols = [
+            "id", "category", "name", "sns_pct", "evt_pct",
+            "expected_sales", "recommended_order", "adjusted_order", "status",
+        ]
+    display_df_viewer = display_df[[c for c in cols if c in display_df.columns]]
     
-    # Customize column metadata
+    col_cfg = {
+        "id": st.column_config.TextColumn("코드", disabled=True),
+        "category": st.column_config.TextColumn("카테고리", disabled=True),
+        "name": st.column_config.TextColumn("상품명", disabled=True),
+        "current_stock": st.column_config.NumberColumn("현재 재고 (개)", disabled=True),
+        "safety_stock": st.column_config.NumberColumn("안전 재고 (개)", disabled=True),
+        "ml_expected": st.column_config.NumberColumn("ML 예측 (개)", disabled=True),
+        "rule_expected": st.column_config.NumberColumn("규칙 예측 (개)", disabled=True),
+        "sns_pct": st.column_config.NumberColumn("SNS %", disabled=True),
+        "evt_pct": st.column_config.NumberColumn("행사 %", disabled=True),
+        "expected_sales": st.column_config.NumberColumn("예상 판매", disabled=True),
+        "recommended_order": st.column_config.NumberColumn("AI 추천 발주", disabled=True),
+        "adjusted_order": st.column_config.NumberColumn(
+            "✍️ 점주 수동 조정 (개)",
+            min_value=0,
+            max_value=150,
+            step=1,
+            help="발주할 최종 수량을 직접 수정할 수 있습니다.",
+        ),
+        "status": st.column_config.TextColumn("진단 상태", disabled=True),
+    }
     edited_df = st.data_editor(
         display_df_viewer,
-        column_config={
-            "id": st.column_config.TextColumn("코드", disabled=True),
-            "category": st.column_config.TextColumn("카테고리", disabled=True),
-            "name": st.column_config.TextColumn("상품명", disabled=True),
-            "current_stock": st.column_config.NumberColumn("현재 재고 (개)", disabled=True),
-            "safety_stock": st.column_config.NumberColumn("안전 재고 (개)", disabled=True),
-            "ml_expected": st.column_config.NumberColumn("ML 예측 (개)", disabled=True),
-            "rule_expected": st.column_config.NumberColumn("규칙 예측 (개)", disabled=True),
-            "recommended_order": st.column_config.NumberColumn("AI 추천 발주", disabled=True),
-            "adjusted_order": st.column_config.NumberColumn(
-                "✍️ 점주 수동 조정 (개)", 
-                min_value=0, 
-                max_value=150, 
-                step=1,
-                help="발주할 최종 수량을 직접 수정할 수 있습니다."
-            ),
-            "status": st.column_config.TextColumn("진단 상태", disabled=True)
-        },
+        column_config={k: v for k, v in col_cfg.items() if k in display_df_viewer.columns},
         use_container_width=True,
         hide_index=True,
-        key="data_editor_grid"
+        key="data_editor_grid",
     )
     
     # Sync edits back to session state to prevent state loss
@@ -180,10 +203,29 @@ def render_product_table(forecast_df, date_str, store_id):
         st.session_state.adjusted_order[p_id] = val
         
     st.write("")
-    
-    # Propose SQLite submit button
-    submit_col1, submit_col2 = st.columns([3, 7])
-    
+
+    reason_labels = [label for _, label in REASON_CODES]
+    reason_values = [code for code, _ in REASON_CODES]
+    ridx = reason_values.index(st.session_state.adjust_reason_code) if st.session_state.adjust_reason_code in reason_values else 0
+    st.session_state.adjust_reason_code = st.selectbox(
+        "📝 발주 조정 사유 (선택)",
+        options=reason_values,
+        format_func=lambda c: dict(REASON_CODES).get(c, c) or "선택 안 함",
+        index=ridx,
+        key="adjust_reason_select",
+    )
+
+    submit_col1, submit_col2, submit_col3 = st.columns([3, 3, 4])
+
+    with submit_col2:
+        st.download_button(
+            "📥 발주 CSV Export",
+            data=_export_order_csv(date_str, store_id, edited_df),
+            file_name=f"order_{store_id}_{date_str}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
     with submit_col1:
         if st.button("🔥 최종 발주 수량 확정 및 피드백 전송", use_container_width=True, type="primary"):
             # Write adjustments to SQLite
@@ -205,7 +247,11 @@ def render_product_table(forecast_df, date_str, store_id):
                     safety_stock=safety_stock,
                     current_stock=current_stock,
                     recommended_order=rec_order,
-                    adjusted_order=adj_order
+                    adjusted_order=adj_order,
+                    workflow_status="CONFIRMED",
+                    adjust_reason_code=st.session_state.adjust_reason_code or None,
+                    sns_uplift=float(row.get("sns_uplift", 0)),
+                    event_uplift=float(row.get("event_uplift", 0)),
                 )
                 
             st.success("✅ 최종 발주가 성공적으로 접수되었습니다. (SQLite DB 기록 및 피드백 누적 완료)")
@@ -218,7 +264,7 @@ def render_product_table(forecast_df, date_str, store_id):
 [12:00:03] [Feedback Loop] {store_id} 점포의 예측 편향성(Bias) 보정이 다음 모델 학습 사이클에 예약되었습니다.
                 """)
                 
-    with submit_col2:
+    with submit_col3:
         st.info("💡 **피드백 루프 작동 원리**: AI 추천 수량과 다르게 입력된 점주의 최종 발주량 수치는 SQLite DB로 자동 적재되며, 실제 판매 데이터와 결합되어 점주 고유의 발주 보정 성향 및 오차 패턴을 재학습하는 파이프라인의 핵심 데이터로 수집됩니다.")
 
 def render_chart(forecast_df):
@@ -355,7 +401,66 @@ def render_reasoning(forecast_df):
         
     render_html('</div>')
 
-def render_executive_report(forecast_df, weather, store_name, district, temp):
+def render_external_signals_panel(trends, events, signal_status: str = ""):
+    st.markdown('<div class="sec-title">📡 SNS 트렌드 · 지역 이벤트 신호</div>', unsafe_allow_html=True)
+    if signal_status:
+        st.caption(signal_status)
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.subheader("📱 SNS 트렌드 TOP")
+        if not trends:
+            st.info("필터 조건을 통과한 트렌드가 없습니다.")
+        for t in trends:
+            render_html(f"""
+            <div class="glass-card" style="padding:14px; margin-bottom:10px;">
+                <div style="font-weight:700;color:#6d28d9;">{t.platform.upper()} · score {t.trend_score:.2f}</div>
+                <div style="font-size:0.95rem;margin:6px 0;"><b>{t.topic}</b></div>
+                <div style="font-size:0.82rem;color:#475569;">{t.summary}</div>
+                <div style="font-size:0.78rem;margin-top:6px;">uplift +{int(t.trend_uplift*100)}% · {t.freshness_hours:.0f}h 전</div>
+            </div>
+            """)
+    with col_r:
+        st.subheader("🎫 다가오는 이벤트")
+        if not events:
+            st.info("반경 내 영향 이벤트가 없습니다.")
+        for e in events:
+            render_html(f"""
+            <div class="glass-card" style="padding:14px; margin-bottom:10px;">
+                <div style="font-weight:700;color:#2563eb;">{e.source} · impact {e.event_impact_score:.2f}</div>
+                <div style="font-size:0.95rem;margin:6px 0;"><b>{e.name}</b></div>
+                <div style="font-size:0.82rem;color:#475569;">{e.venue_name} · {e.distance_km:.1f}km</div>
+                <div style="font-size:0.78rem;margin-top:6px;">{e.start_at[:16]}</div>
+            </div>
+            """)
+
+
+def render_backtest_tab(engine, store_id: str):
+    st.markdown('<div class="sec-title">📉 발주 백테스트 (과거 60일)</div>', unsafe_allow_html=True)
+    bt = run_backtest(engine.sales_df, store_id, days=60)
+    if bt.empty:
+        st.warning("백테스트 데이터가 없습니다. `python data_generator.py`를 실행하세요.")
+        return
+    st.dataframe(bt, use_container_width=True, hide_index=True)
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=bt["date"], y=bt["disposed_qty"], name="폐기량", marker_color="#f59e0b"))
+    fig.add_trace(go.Scatter(x=bt["date"], y=bt["sold_out_count"], name="품절 건수", yaxis="y2", line=dict(color="#ef4444")))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        yaxis=dict(title="폐기 (개)"),
+        yaxis2=dict(title="품절", overlaying="y", side="right"),
+        height=320,
+        margin=dict(l=40, r=40, t=20, b=80),
+        legend=dict(orientation="h"),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.caption("Naive vs AI-style 발주 총량은 테이블의 naive_order_total / ai_style_order_total 컬럼을 참고하세요.")
+
+
+def render_executive_report(
+    forecast_df, weather, store_name, district, temp,
+    trend_summaries=None, event_summaries=None,
+):
     st.markdown('<div class="sec-title">📄 AI 자동 작성 종합 발주 분석 리포트</div>', unsafe_allow_html=True)
     
     danger_items = forecast_df[forecast_df["status"] == "품절 위험"]
@@ -365,6 +470,12 @@ def render_executive_report(forecast_df, weather, store_name, district, temp):
     
     # 1. Compose dynamic report paragraph
     intro = f"금일 **{store_name}** 점포는 외부 기상 여건(<b>날씨: {weather} / 기온: {temp}℃</b>)과 <b>{district} 상권</b>의 요일별 유동인구 이동 패턴이 결합된 형태를 띠고 있습니다."
+
+    external_block = ""
+    if trend_summaries:
+        external_block += f"<br><br>📱 <b>SNS 트렌드</b>: {trend_summaries[0]}"
+    if event_summaries:
+        external_block += f"<br>🎫 <b>인근 행사</b>: {event_summaries[0]}"
     
     # Weather specifics
     if weather == "비":
@@ -407,7 +518,7 @@ def render_executive_report(forecast_df, weather, store_name, district, temp):
             <span>🏪 AI Smart Order Executive Report</span>
         </div>
         <p class="report-p">
-            {intro}<br><br>
+            {intro}{external_block}<br><br>
             {weather_analysis}
         </p>
         <div class="report-title" style="border-bottom:none; margin-top:20px; font-size:1rem; margin-bottom:8px;">

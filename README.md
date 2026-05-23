@@ -87,6 +87,17 @@ python -m streamlit run app.py
 
 ---
 
+## AX 확장 (외부 신호)
+
+- **SNS**: X, Instagram, TikTok → AI 트렌드 스코어 → 발주 수요 반영 (기본 Mock)
+- **이벤트**: Ticketmaster Discovery, Eventbrite, ODE → 점포 반경 행사 수요 가중
+- 요구 사항: [docs/AX_REQUIREMENTS.md](docs/AX_REQUIREMENTS.md)
+- 구현 가이드: [docs/implements.md](docs/implements.md)
+
+환경 설정: [docs/envsetting.md](docs/envsetting.md) — `.env.example`을 `.env`로 복사 후 키 발급·`USE_MOCK_EXTERNAL_SIGNALS` 설정.
+
+---
+
 ## ⚡ 기술 스택
 *   **Frontend**: Streamlit Custom Glassmorphic Styling
 *   **Styling**: Pure CSS + Translucent Frosted Glass Overlay

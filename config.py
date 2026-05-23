@@ -122,3 +122,45 @@ BASELINE_PRODUCTS = [
         "disposal_risk": "MEDIUM"
     },
 ]
+
+import os
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+
+class Settings:
+    USE_MOCK_EXTERNAL = os.getenv("USE_MOCK_EXTERNAL_SIGNALS", "true").lower() == "true"
+    TREND_SCORE_THRESHOLD = float(os.getenv("TREND_SCORE_THRESHOLD", "0.7"))
+    TREND_MAX_AGE_HOURS = int(os.getenv("TREND_MAX_AGE_HOURS", "72"))
+    TREND_TOP_K = int(os.getenv("TREND_TOP_K", "10"))
+    MAX_EXTERNAL_UPLIFT = float(os.getenv("MAX_EXTERNAL_UPLIFT", "0.40"))
+    EVENT_SEARCH_RADIUS_KM = float(os.getenv("EVENT_SEARCH_RADIUS_KM", "3"))
+    EVENT_DAY_WINDOW = int(os.getenv("EVENT_DAY_WINDOW", "1"))
+
+
+SETTINGS = Settings()
+
+TRADE_AREA_RADIUS_KM = {"학교": 2.0, "오피스": 1.5, "주거지": 3.0}
+
+SNS_KEYWORDS_BY_CATEGORY = {
+    "음료": ["생수", "얼음컵", "아메리카노", "편의점 음료"],
+    "식사": ["도시락", "샌드위치", "컵라면"],
+    "간식": ["아이스크림", "핫바", "편의점 간식"],
+    "주류": ["맥주", "캔맥주"],
+    "잡화": ["우산", "편의점"],
+}
+
+SNS_KEYWORDS_FLAT = sorted({kw for kws in SNS_KEYWORDS_BY_CATEGORY.values() for kw in kws})
+
+REASON_CODES = [
+    ("", "선택 안 함"),
+    ("ACCEPT", "AI 추천 수용"),
+    ("EVENT", "인근 행사 대비"),
+    ("TREND", "SNS 트렌드 반영"),
+    ("STOCK", "재고 상황"),
+    ("EXP", "점주 경험"),
+]

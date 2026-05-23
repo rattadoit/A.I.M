@@ -3,3 +3,5 @@ scikit-learn>=1.2.0
 streamlit>=1.22.0
 plotly>=5.14.0
 numpy>=1.22.0
+httpx>=0.27.0
+python-dotenv>=1.0.0

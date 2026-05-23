@@ -10,12 +10,41 @@ def get_connection():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     return sqlite3.connect(DB_PATH)
 
+def _migrate_order_log(cursor):
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(order_recommendation_log)")}
+    for name, typedef in [
+        ("workflow_status", "TEXT DEFAULT 'CONFIRMED'"),
+        ("adjust_reason_code", "TEXT"),
+        ("adjust_reason_note", "TEXT"),
+        ("sns_uplift_applied", "REAL DEFAULT 0"),
+        ("event_uplift_applied", "REAL DEFAULT 0"),
+    ]:
+        if name not in cols:
+            cursor.execute(
+                f"ALTER TABLE order_recommendation_log ADD COLUMN {name} {typedef}"
+            )
+
+
+def _create_external_signal_log(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS external_signal_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            date TEXT NOT NULL,
+            store_id TEXT NOT NULL,
+            signal_type TEXT NOT NULL DEFAULT 'combined',
+            payload_json TEXT NOT NULL,
+            total_sns_uplift REAL DEFAULT 0,
+            total_event_uplift REAL DEFAULT 0
+        )
+    """)
+
+
 def init_db():
     """Initializes the feedback SQLite database and tables."""
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Create order_recommendation_log table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS order_recommendation_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,11 +60,27 @@ def init_db():
             is_submitted INTEGER NOT NULL DEFAULT 1
         )
     """)
+    _migrate_order_log(cursor)
+    _create_external_signal_log(cursor)
     conn.commit()
     conn.close()
     print("Database initialized successfully at:", DB_PATH)
 
-def save_recommendation_feedback(date_str, store_id, product_id, predicted_sales, safety_stock, current_stock, recommended_order, adjusted_order):
+def save_recommendation_feedback(
+    date_str,
+    store_id,
+    product_id,
+    predicted_sales,
+    safety_stock,
+    current_stock,
+    recommended_order,
+    adjusted_order,
+    workflow_status="CONFIRMED",
+    adjust_reason_code=None,
+    adjust_reason_note=None,
+    sns_uplift=0.0,
+    event_uplift=0.0,
+):
     """
     Saves or updates a recommendation confirmation in the feedback log.
     If a record exists for the same date, store, and product, it will overwrite it.
@@ -57,17 +102,30 @@ def save_recommendation_feedback(date_str, store_id, product_id, predicted_sales
         # Update existing record
         cursor.execute("""
             UPDATE order_recommendation_log
-            SET timestamp = ?, predicted_sales_qty = ?, safety_stock = ?, current_stock = ?, 
-                recommended_order_qty = ?, owner_adjusted_qty = ?, is_submitted = 1
+            SET timestamp = ?, predicted_sales_qty = ?, safety_stock = ?, current_stock = ?,
+                recommended_order_qty = ?, owner_adjusted_qty = ?, is_submitted = 1,
+                workflow_status = ?, adjust_reason_code = ?, adjust_reason_note = ?,
+                sns_uplift_applied = ?, event_uplift_applied = ?
             WHERE id = ?
-        """, (timestamp_str, predicted_sales, safety_stock, current_stock, recommended_order, adjusted_order, existing[0]))
+        """, (
+            timestamp_str, predicted_sales, safety_stock, current_stock,
+            recommended_order, adjusted_order, workflow_status,
+            adjust_reason_code, adjust_reason_note, sns_uplift, event_uplift,
+            existing[0],
+        ))
     else:
-        # Insert new record
         cursor.execute("""
-            INSERT INTO order_recommendation_log 
-            (timestamp, date, store_id, product_id, predicted_sales_qty, safety_stock, current_stock, recommended_order_qty, owner_adjusted_qty, is_submitted)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-        """, (timestamp_str, date_str, store_id, product_id, predicted_sales, safety_stock, current_stock, recommended_order, adjusted_order))
+            INSERT INTO order_recommendation_log
+            (timestamp, date, store_id, product_id, predicted_sales_qty, safety_stock,
+             current_stock, recommended_order_qty, owner_adjusted_qty, is_submitted,
+             workflow_status, adjust_reason_code, adjust_reason_note,
+             sns_uplift_applied, event_uplift_applied)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+        """, (
+            timestamp_str, date_str, store_id, product_id, predicted_sales, safety_stock,
+            current_stock, recommended_order, adjusted_order, workflow_status,
+            adjust_reason_code, adjust_reason_note, sns_uplift, event_uplift,
+        ))
         
     conn.commit()
     conn.close()
@@ -122,6 +180,38 @@ def get_feedback_metrics(store_id=None):
         "adoptions": adoptions,
         "overrides": overrides
     }
+
+def save_external_signal_log(
+    date_str, store_id, payload_json, total_sns_uplift=0.0, total_event_uplift=0.0
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+    timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("""
+        INSERT INTO external_signal_log
+        (timestamp, date, store_id, signal_type, payload_json, total_sns_uplift, total_event_uplift)
+        VALUES (?, ?, ?, 'combined', ?, ?, ?)
+    """, (
+        timestamp_str, date_str, store_id, payload_json,
+        total_sns_uplift, total_event_uplift,
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_external_signal_history(store_id=None, limit=20):
+    conn = get_connection()
+    query = "SELECT * FROM external_signal_log"
+    params = []
+    if store_id:
+        query += " WHERE store_id = ?"
+        params.append(store_id)
+    query += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+    return df
+
 
 # Self-initialization call when loaded
 init_db()

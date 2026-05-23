@@ -1,0 +1,62 @@
+{
+  "S001": {
+    "events": [
+      {
+        "canonical_event_id": "evt-001",
+        "source": "ticketmaster",
+        "source_event_id": "tm-mock-1",
+        "name": "홍대 인디 콘서트",
+        "start_at": "2026-05-24T19:00:00",
+        "end_at": "2026-05-24T22:00:00",
+        "venue_name": "홍대 라이브홀",
+        "lat": 37.556,
+        "lon": 126.923,
+        "distance_km": 1.2,
+        "event_type": "concert",
+        "event_impact_score": 0.75,
+        "affected_categories": ["주류", "간식"],
+        "affected_product_ids": ["P08", "P09", "P10"]
+      }
+    ]
+  },
+  "S002": {
+    "events": [
+      {
+        "canonical_event_id": "evt-002",
+        "source": "eventbrite",
+        "source_event_id": "eb-mock-1",
+        "name": "여의도 야간 네트워킹",
+        "start_at": "2026-05-23T18:30:00",
+        "end_at": "2026-05-23T21:00:00",
+        "venue_name": "여의도 컨벤션",
+        "lat": 37.5219,
+        "lon": 126.9245,
+        "distance_km": 0.8,
+        "event_type": "festival",
+        "event_impact_score": 0.65,
+        "affected_categories": ["음료", "주류"],
+        "affected_product_ids": ["P04", "P08", "P02"]
+      }
+    ]
+  },
+  "S003": {
+    "events": [
+      {
+        "canonical_event_id": "evt-003",
+        "source": "ode",
+        "source_event_id": "ode-mock-1",
+        "name": "마포구 봄 축제",
+        "start_at": "2026-05-25T11:00:00",
+        "end_at": "2026-05-25T17:00:00",
+        "venue_name": "마포공원",
+        "lat": 37.5636,
+        "lon": 126.9086,
+        "distance_km": 2.1,
+        "event_type": "festival",
+        "event_impact_score": 0.7,
+        "affected_categories": ["음료", "식사"],
+        "affected_product_ids": ["P04", "P05", "P01"]
+      }
+    ]
+  }
+}

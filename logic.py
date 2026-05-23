@@ -361,10 +361,21 @@ def get_continuous_weather_factor(product_name, temp, humidity, rainfall):
         
     return max(0.15, factor)  # floor at 15% to prevent negative or zero sales
 
-def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humidity, rainfall, is_rainy, engine):
+def get_integrated_forecast(
+    target_date_str,
+    store_id,
+    weather_label,
+    temp,
+    humidity,
+    rainfall,
+    is_rainy,
+    engine,
+    external_context=None,
+):
     """
     Integrates ML models and Heuristics predictions. Calculates safety stock,
     safety-stock flags, recommended orders, and return values in a DataFrame.
+    external_context: services.forecast_context.ExternalForecastContext (SNS·이벤트 uplift)
     """
     # 1. Day information
     date_obj = datetime.datetime.strptime(target_date_str, "%Y-%m-%d")
@@ -397,15 +408,27 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
         # Predictions
         ml_expected = ml_preds[p_id]
         rule_expected = rule_preds[p_id]["expected_sales"]
-        reason = rule_preds[p_id]["reason"]
         
         # Calculate continuous scaling multiplier based on slider state relative to base weather defaults
         current_factor = get_continuous_weather_factor(p_name, temp, humidity, rainfall)
         default_factor = get_continuous_weather_factor(p_name, def_temp, def_hum, def_rain)
         relative_mult = current_factor / default_factor
         
-        # Blended expected sales (continuous gliding floats)
-        expected_sales = round(float(ml_expected * relative_mult), 1)
+        # Blended expected sales (continuous gliding floats + external signals)
+        base_expected = float(ml_expected * relative_mult)
+        sns_u = 0.0
+        evt_u = 0.0
+        external_reason = ""
+        if external_context is not None:
+            sns_u = float(external_context.sns_by_product.get(p_id, 0.0))
+            evt_u = float(external_context.event_by_product.get(p_id, 0.0))
+            external_reason = external_context.reason_snippets.get(p_id, "")
+
+        expected_sales = round(base_expected * (1.0 + sns_u) * (1.0 + evt_u), 1)
+
+        reason = rule_preds[p_id]["reason"]
+        if external_reason:
+            reason = f"{reason} | {external_reason}"
         
         # Safety Stock calculation
         safety_stock = get_dynamic_safety_stock(shelf_life, disposal_risk, expected_sales)
@@ -434,11 +457,15 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
             "safety_stock": safety_stock,
             "ml_expected": ml_expected,
             "rule_expected": rule_expected,
+            "base_expected": round(base_expected, 1),
+            "sns_uplift": sns_u,
+            "event_uplift": evt_u,
             "expected_sales": expected_sales,
             "recommended_order": recommended_order,
             "status": status,
             "waste_risk_qty": waste_risk,
             "reason": reason,
+            "external_reason": external_reason,
             "base_sales": base_sales
         })
         
