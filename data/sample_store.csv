@@ -1,4 +1,4 @@
-﻿store_id,store_name,trade_area_type,region
-S001,대학가 학생점,학교,서울
-S002,여의도 금융가점,오피스,서울
-S003,마포래미안 주거점,주거지,서울
+﻿store_id,store_name,trade_area_type,region,latitude,longitude,address,school_count,hospital_count,office_count,subway_distance,commercial_density,residential_ratio,store_area_type
+S001,대학가 학생점,학교,서울,37.5584,126.9459,서울시 서대문구 대학가 인근,6,1,5,280,0.72,0.38,대학가
+S002,여의도 금융가점,오피스,서울,37.5259,126.9245,서울시 영등포구 여의도 업무지구,1,2,22,180,0.91,0.18,오피스밀집
+S003,마포래미안 주거점,주거지,서울,37.5519,126.9134,서울시 마포구 대단지 아파트 인근,3,3,4,620,0.56,0.82,주거밀집

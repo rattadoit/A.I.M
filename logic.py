@@ -274,8 +274,8 @@ def calculate_rule_forecast(weather, store_row, day_of_week):
                 w_mult = 10.0
                 reasons.append("🌧️ 우산 수요 폭발 (+900%)")
             elif p["name"] == "컵라면":
-                w_mult = 1.8
-                reasons.append("🍜 뜨거운 국물류 선호 (+80%)")
+                w_mult = 1.1
+                reasons.append("🍜 뜨거운 국물류 선호 (+10%)")
             elif p["name"] == "도시락":
                 w_mult = 1.2
                 reasons.append("🍱 편의점 내 간편식 선호 (+20%)")
@@ -309,8 +309,8 @@ def calculate_rule_forecast(weather, store_row, day_of_week):
         # Commercial District rules
         if district == "학교":
             if p["name"] == "컵라면":
-                d_mult = 2.0
-                reasons.append("🏫 학생 간식 소비 폭발 (+100%)")
+                d_mult = 1.7
+                reasons.append("🏫 학생 간식 소비 폭발 (+70%)")
             elif p["name"] == "샌드위치":
                 d_mult = 1.8
                 reasons.append("🥪 등하교 간편 식사 대용 (+80%)")
@@ -382,17 +382,20 @@ def get_dynamic_safety_stock(shelf_life, disposal_risk, expected_sales):
     - HIGH risk (Fresh Foods): Tight safety margins to avoid heavy waste/write-offs.
     - MEDIUM risk: Moderate safety stocks.
     - LOW risk (Dry goods/Beverages): Higher safety stock to capture all sales and prevent stockouts.
+    - Capped at maximum 40 units to prevent backroom overstocking.
     """
     if shelf_life == "FF":
         if disposal_risk == "HIGH":
             # Very tight safety margin (15% of expected sales)
-            return max(1, int(round(expected_sales * 0.15)))
+            val = max(1, int(round(expected_sales * 0.15)))
         else:
             # Medium disposal risk (30% of expected sales)
-            return max(2, int(round(expected_sales * 0.30)))
+            val = max(2, int(round(expected_sales * 0.30)))
     else:
         # Long shelf life, dry products (60% of expected sales)
-        return max(3, int(round(expected_sales * 0.60)))
+        val = max(3, int(round(expected_sales * 0.60)))
+        
+    return min(40, val)
 
 def get_continuous_weather_factor(product_name, temp, humidity, rainfall):
     """
@@ -418,9 +421,10 @@ def get_continuous_weather_factor(product_name, temp, humidity, rainfall):
         factor = temp_factor * humidity_factor
         
     elif product_name == "우산":
-        # Extremely sensitive to rainfall.
+        # Ultra-conservative logarithmic saturation to model highly restricted physical store limits
         if rainfall > 0.0:
-            factor = 1.0 + (rainfall * 0.9)  # +90% per 1mm rain (e.g. 10mm -> 10.0x)
+            import math
+            factor = 1.0 + 0.45 * math.log(1.0 + rainfall)  # scales gentler, maxing out at 3.0x under 80mm rain
         else:
             factor = 1.0
             
@@ -437,9 +441,9 @@ def get_continuous_weather_factor(product_name, temp, humidity, rainfall):
         factor = temp_factor * humidity_factor
         
     elif product_name == "컵라면":
-        # Prefers rain and cold, dislikes heat
-        temp_factor = 1.0 - (temp - 20.0) * 0.02  # -2% per 1C
-        rain_bonus = 1.0 + (rainfall * 0.025)  # +2.5% per 1mm rain
+        # Prefers cold slightly, rain bonus capped at a very realistic 10%
+        temp_factor = 1.0 - (temp - 20.0) * 0.01  # gentler slope: -1% per 1C
+        rain_bonus = 1.0 + min(0.1, rainfall * 0.005)  # +0.5% per 1mm, capped at +10% max
         factor = temp_factor * rain_bonus
         
     elif product_name == "샌드위치":
@@ -469,6 +473,57 @@ def get_continuous_weather_factor(product_name, temp, humidity, rainfall):
         
     return max(0.15, factor)  # floor at 15% to prevent negative or zero sales
 
+def is_promotion_active(target_date_str, start_str, end_str):
+    if not start_str or not end_str or pd.isna(start_str) or pd.isna(end_str):
+        return False
+    start_str = str(start_str).strip()
+    end_str = str(end_str).strip()
+    if start_str.lower() in ["none", "nan", ""] or end_str.lower() in ["none", "nan", ""]:
+        return False
+    try:
+        target = datetime.datetime.strptime(target_date_str, "%Y-%m-%d").date()
+        start = datetime.datetime.strptime(start_str, "%Y-%m-%d").date()
+        end = datetime.datetime.strptime(end_str, "%Y-%m-%d").date()
+        return start <= target <= end
+    except Exception:
+        return False
+
+def get_top_products(period='daily'):
+    """
+    Retrieves Top 10 products based on sales quantity for the given period.
+    - daily: sales on the latest date in history
+    - weekly: sales over the last 7 days in history
+    - monthly: sales over the last 30 days in history
+    """
+    sales_csv = "data/sample_sales.csv"
+    product_csv = "data/sample_product.csv"
+    if not os.path.exists(sales_csv) or not os.path.exists(product_csv):
+        return pd.DataFrame()
+        
+    sales_df = pd.read_csv(sales_csv)
+    product_df = pd.read_csv(product_csv)
+    
+    sales_df["date"] = pd.to_datetime(sales_df["date"])
+    max_date = sales_df["date"].max()
+    
+    if period == "daily":
+        filtered_df = sales_df[sales_df["date"] == max_date]
+    elif period == "weekly":
+        start_date = max_date - datetime.timedelta(days=7)
+        filtered_df = sales_df[sales_df["date"] > start_date]
+    elif period == "monthly":
+        start_date = max_date - datetime.timedelta(days=30)
+        filtered_df = sales_df[sales_df["date"] > start_date]
+    else:
+        filtered_df = sales_df
+        
+    # Group by product_id
+    top_sales = filtered_df.groupby("product_id")["sales_qty"].sum().reset_index()
+    top_sales = top_sales.merge(product_df, on="product_id", how="left")
+    top_sales = top_sales.sort_values(by="sales_qty", ascending=False).head(10)
+    
+    return top_sales
+
 def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humidity, rainfall, is_rainy, engine):
     """
     Integrates ML models and Heuristics predictions. Calculates safety stock,
@@ -491,6 +546,10 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
     else:  # "맑음"
         def_temp, def_hum, def_rain = 21.5, 52.0, 0.0
         
+    # Get weekly popularity (only highlight the top 3 podium products as popular)
+    weekly_top_df = get_top_products("weekly").head(3)
+    weekly_top_ids = list(weekly_top_df["product_id"].unique()) if not weekly_top_df.empty else []
+    
     integrated_results = []
     
     for p in BASELINE_PRODUCTS:
@@ -501,20 +560,48 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
         shelf_life = p["shelf_life_type"]
         disposal_risk = p["disposal_risk"]
         price = p["price"]
-        base_sales = p["base_sales"]
+        
+        # Calculate the actual national average sales dynamically from all stores in the history
+        sub_sales_all = engine.sales_df[engine.sales_df["product_id"] == p_id]
+        if not sub_sales_all.empty:
+            base_sales = round(float(sub_sales_all["sales_qty"].mean()), 1)
+        else:
+            base_sales = p["base_sales"]
+        
         
         # Predictions
         ml_expected = ml_preds[p_id]
         rule_expected = rule_preds[p_id]["expected_sales"]
         reason = rule_preds[p_id]["reason"]
         
+        # Get product master row
+        prod_row = engine.product_df[engine.product_df["product_id"] == p_id].iloc[0]
+        
+        # Promotion analysis & multipliers
+        promo_active = is_promotion_active(target_date_str, prod_row.get("promotion_start_date"), prod_row.get("promotion_end_date"))
+        promo_multiplier = 1.0
+        promo_reason = ""
+        
+        if promo_active:
+            promo_type = str(prod_row.get("promotion_type"))
+            if promo_type == "1+1":
+                promo_multiplier = 1.4
+                promo_reason = "🎁 1+1 행사 진행중 (+40% 수요 반영)"
+            elif promo_type == "2+1":
+                promo_multiplier = 1.2
+                promo_reason = "🎁 2+1 행사 진행중 (+20% 수요 반영)"
+            elif promo_type == "할인":
+                rate = float(prod_row.get("discount_rate", 0.0))
+                promo_multiplier = round(1.0 + rate * 1.5, 2)
+                promo_reason = f"🏷️ 할인 행사 진행중 ({rate*100:.0f}% 할인, +{rate*150:.0f}% 수요 반영)"
+                
         # Calculate continuous scaling multiplier based on slider state relative to base weather defaults
         current_factor = get_continuous_weather_factor(p_name, temp, humidity, rainfall)
         default_factor = get_continuous_weather_factor(p_name, def_temp, def_hum, def_rain)
         relative_mult = current_factor / default_factor
         
-        # Blended expected sales (continuous gliding floats)
-        expected_sales = round(float(ml_expected * relative_mult), 1)
+        # Blended expected sales with weather continuous gliding and active promotion multipliers
+        expected_sales = round(float(ml_expected * relative_mult * promo_multiplier), 1)
         
         # Safety Stock calculation
         safety_stock = get_dynamic_safety_stock(shelf_life, disposal_risk, expected_sales)
@@ -532,6 +619,18 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
             status = "폐기 우려"
             waste_risk = int(max(0, current_stock - expected_sales))
             
+        # Build recommendation reason
+        reasons_list = []
+        if promo_active:
+            reasons_list.append(promo_reason)
+        if p_id in weekly_top_ids:
+            reasons_list.append("🔥 주간 인기상품")
+            
+        if reasons_list:
+            recommend_reason = " & ".join(reasons_list)
+        else:
+            recommend_reason = "기본 안정 수요 흐름 유지"
+            
         integrated_results.append({
             "id": p_id,
             "name": p_name,
@@ -548,7 +647,53 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
             "status": status,
             "waste_risk_qty": waste_risk,
             "reason": reason,
-            "base_sales": base_sales
+            "base_sales": base_sales,
+            "original_price": float(prod_row.get("original_price", price)),
+            "discount_price": float(prod_row.get("discount_price", price)),
+            "discount_rate": float(prod_row.get("discount_rate", 0.0)),
+            "promotion_type": str(prod_row.get("promotion_type", "None")),
+            "is_1plus1": int(prod_row.get("is_1plus1", 0)),
+            "is_2plus1": int(prod_row.get("is_2plus1", 0)),
+            "promotion_start_date": str(prod_row.get("promotion_start_date", "None")),
+            "promotion_end_date": str(prod_row.get("promotion_end_date", "None")),
+            "recommend_reason": recommend_reason,
+            "relative_mult": relative_mult,
+            "promo_multiplier": promo_multiplier
         })
         
+    # Rainy condition safety guard: Cup Ramen weather multiplier can NEVER exceed Umbrella weather multiplier
+    if rainfall > 0.0:
+        umbrella_item = None
+        ramen_item = None
+        for item in integrated_results:
+            if item["name"] == "우산":
+                umbrella_item = item
+            elif item["name"] == "컵라면":
+                ramen_item = item
+                
+        if umbrella_item and ramen_item:
+            umb_mult = umbrella_item["relative_mult"]
+            ram_mult = ramen_item["relative_mult"]
+            if ram_mult > umb_mult:
+                # Force Ramen weather multiplier to be capped strictly at Umbrella's weather multiplier
+                ramen_item["relative_mult"] = umb_mult
+                # Recalculate Ramen's expected sales and recommended order based on capped multiplier
+                new_sales = round(float(ramen_item["ml_expected"] * umb_mult * ramen_item["promo_multiplier"]), 1)
+                ramen_item["expected_sales"] = new_sales
+                
+                # Re-calculate safety stock and recommended order with the capped sales
+                new_safety = get_dynamic_safety_stock(ramen_item["shelf_life_type"], ramen_item["disposal_risk"], new_sales)
+                ramen_item["safety_stock"] = new_safety
+                ramen_item["recommended_order"] = int(max(0, round(new_sales + new_safety - ramen_item["current_stock"])))
+                
+                # Re-evaluate stock alert status
+                if ramen_item["current_stock"] < new_sales:
+                    ramen_item["status"] = "품절 위험"
+                elif ramen_item["shelf_life_type"] == "FF" and ramen_item["current_stock"] > (new_sales * 1.5):
+                    ramen_item["status"] = "폐기 우려"
+                    ramen_item["waste_risk_qty"] = int(max(0, ramen_item["current_stock"] - new_sales))
+                else:
+                    ramen_item["status"] = "정상"
+                    ramen_item["waste_risk_qty"] = 0
+                    
     return pd.DataFrame(integrated_results)

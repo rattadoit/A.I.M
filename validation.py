@@ -161,3 +161,75 @@ def detect_order_anomalies(orders: list[dict]) -> list[dict]:
     # High → Medium → Low 순 정렬
     anomalies.sort(key=lambda x: SEVERITY_RANK.get(x["severity"], 0), reverse=True)
     return anomalies
+
+
+def validate_promotion_data(product_df) -> list[str]:
+    """
+    Validates promotion fields in the product master dataframe.
+    Returns a list of validation error/warning messages.
+    """
+    import pandas as pd
+    from datetime import datetime
+    
+    errors = []
+    required_cols = [
+        "original_price", "discount_price", "discount_rate", 
+        "promotion_type", "is_1plus1", "is_2plus1", 
+        "promotion_start_date", "promotion_end_date"
+    ]
+    
+    for col in required_cols:
+        if col not in product_df.columns:
+            errors.append(f"필수 프로모션 컬럼 누락: '{col}'")
+            
+    if errors:
+        return errors  # Stop further checks if core columns are missing
+        
+    for index, row in product_df.iterrows():
+        p_id = row.get("product_id", f"Row_{index}")
+        p_name = row.get("product_name", f"상품_{p_id}")
+        
+        orig = float(row["original_price"])
+        disc = float(row["discount_price"])
+        rate = float(row["discount_rate"])
+        promo_type = str(row["promotion_type"])
+        
+        # 1. Price validation
+        if orig < 0:
+            errors.append(f"[{p_name}] 원가 오류: 원가 {orig}원은 0보다 작을 수 없습니다.")
+        if disc < 0:
+            errors.append(f"[{p_name}] 할인가 오류: 할인가 {disc}원은 0보다 작을 수 없습니다.")
+        if disc > orig:
+            errors.append(f"[{p_name}] 가격 무결성 오류: 할인가 {disc}원이 원가 {orig}원보다 큽니다.")
+            
+        # 2. Discount rate check
+        if orig > 0:
+            expected_rate = round((orig - disc) / orig, 2)
+            # check rate with delta margin of 0.05
+            if abs(rate - expected_rate) > 0.05 and promo_type != "None" and promo_type != "nan" and promo_type != "":
+                errors.append(f"[{p_name}] 할인율 불일치: 입력값 {rate*100:.1f}%, 계산값 {expected_rate*100:.1f}%")
+                
+        # 3. Date validation
+        start_date = str(row["promotion_start_date"])
+        end_date = str(row["promotion_end_date"])
+        
+        if promo_type != "None" and promo_type != "nan" and promo_type != "":
+            s_dt = None
+            e_dt = None
+            
+            # Check start date
+            try:
+                s_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            except ValueError:
+                errors.append(f"[{p_name}] 날짜 형식 오류: 시작일 '{start_date}'은 YYYY-MM-DD 형식이어야 합니다.")
+                
+            # Check end date
+            try:
+                e_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            except ValueError:
+                errors.append(f"[{p_name}] 날짜 형식 오류: 종료일 '{end_date}'은 YYYY-MM-DD 형식이어야 합니다.")
+                
+            if s_dt and e_dt and s_dt > e_dt:
+                errors.append(f"[{p_name}] 날짜 무결성 오류: 시작일 '{start_date}'이 종료일 '{end_date}'보다 늦습니다.")
+                
+    return errors

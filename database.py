@@ -28,14 +28,44 @@ def init_db():
             current_stock INTEGER NOT NULL,
             recommended_order_qty INTEGER NOT NULL,
             owner_adjusted_qty INTEGER NOT NULL,
-            is_submitted INTEGER NOT NULL DEFAULT 1
+            is_submitted INTEGER NOT NULL DEFAULT 1,
+            original_price REAL DEFAULT 0.0,
+            discount_price REAL DEFAULT 0.0,
+            discount_rate REAL DEFAULT 0.0,
+            promotion_type TEXT DEFAULT 'None',
+            is_1plus1 INTEGER DEFAULT 0,
+            is_2plus1 INTEGER DEFAULT 0,
+            promotion_start_date TEXT DEFAULT 'None',
+            promotion_end_date TEXT DEFAULT 'None'
         )
     """)
+    
+    # Ensure columns exist (for migration of existing databases)
+    cursor.execute("PRAGMA table_info(order_recommendation_log)")
+    cols = [col[1] for col in cursor.fetchall()]
+    migration_cols = {
+        "original_price": "REAL DEFAULT 0.0",
+        "discount_price": "REAL DEFAULT 0.0",
+        "discount_rate": "REAL DEFAULT 0.0",
+        "promotion_type": "TEXT DEFAULT 'None'",
+        "is_1plus1": "INTEGER DEFAULT 0",
+        "is_2plus1": "INTEGER DEFAULT 0",
+        "promotion_start_date": "TEXT DEFAULT 'None'",
+        "promotion_end_date": "TEXT DEFAULT 'None'"
+    }
+    for col_name, col_type in migration_cols.items():
+        if col_name not in cols:
+            cursor.execute(f"ALTER TABLE order_recommendation_log ADD COLUMN {col_name} {col_type}")
+            
     conn.commit()
     conn.close()
     print("Database initialized successfully at:", DB_PATH)
 
-def save_recommendation_feedback(date_str, store_id, product_id, predicted_sales, safety_stock, current_stock, recommended_order, adjusted_order):
+def save_recommendation_feedback(
+    date_str, store_id, product_id, predicted_sales, safety_stock, current_stock, recommended_order, adjusted_order,
+    original_price=0.0, discount_price=0.0, discount_rate=0.0, promotion_type="None", 
+    is_1plus1=0, is_2plus1=0, promotion_start_date="None", promotion_end_date="None"
+):
     """
     Saves or updates a recommendation confirmation in the feedback log.
     If a record exists for the same date, store, and product, it will overwrite it.
@@ -58,16 +88,27 @@ def save_recommendation_feedback(date_str, store_id, product_id, predicted_sales
         cursor.execute("""
             UPDATE order_recommendation_log
             SET timestamp = ?, predicted_sales_qty = ?, safety_stock = ?, current_stock = ?, 
-                recommended_order_qty = ?, owner_adjusted_qty = ?, is_submitted = 1
+                recommended_order_qty = ?, owner_adjusted_qty = ?, is_submitted = 1,
+                original_price = ?, discount_price = ?, discount_rate = ?, promotion_type = ?,
+                is_1plus1 = ?, is_2plus1 = ?, promotion_start_date = ?, promotion_end_date = ?
             WHERE id = ?
-        """, (timestamp_str, predicted_sales, safety_stock, current_stock, recommended_order, adjusted_order, existing[0]))
+        """, (
+            timestamp_str, predicted_sales, safety_stock, current_stock, recommended_order, adjusted_order,
+            original_price, discount_price, discount_rate, promotion_type,
+            is_1plus1, is_2plus1, promotion_start_date, promotion_end_date,
+            existing[0]
+        ))
     else:
         # Insert new record
         cursor.execute("""
             INSERT INTO order_recommendation_log 
-            (timestamp, date, store_id, product_id, predicted_sales_qty, safety_stock, current_stock, recommended_order_qty, owner_adjusted_qty, is_submitted)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-        """, (timestamp_str, date_str, store_id, product_id, predicted_sales, safety_stock, current_stock, recommended_order, adjusted_order))
+            (timestamp, date, store_id, product_id, predicted_sales_qty, safety_stock, current_stock, recommended_order_qty, owner_adjusted_qty, is_submitted,
+             original_price, discount_price, discount_rate, promotion_type, is_1plus1, is_2plus1, promotion_start_date, promotion_end_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            timestamp_str, date_str, store_id, product_id, predicted_sales, safety_stock, current_stock, recommended_order, adjusted_order,
+            original_price, discount_price, discount_rate, promotion_type, is_1plus1, is_2plus1, promotion_start_date, promotion_end_date
+        ))
         
     conn.commit()
     conn.close()

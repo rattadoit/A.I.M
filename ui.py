@@ -325,9 +325,17 @@ def render_product_table(forecast_df, date_str, store_id):
         
     display_df["adjusted_order"] = display_df["id"].map(st.session_state.adjusted_order)
     
+    # Format columns for premium reading layout
+    display_df["promotion_display"] = display_df["promotion_type"].apply(
+        lambda x: "-" if str(x).lower() in ["none", "nan", "", "nan_value"] else str(x)
+    )
+    display_df["discount_display"] = display_df["discount_rate"].apply(
+        lambda x: "-" if float(x) == 0.0 else f"{int(round(x * 100))}%"
+    )
+    
     # Format columns for nice reading
     display_df_viewer = display_df[[
-        "id", "category", "name", "current_stock", "safety_stock", 
+        "id", "category", "name", "promotion_display", "discount_display", "current_stock", "safety_stock", 
         "ml_expected", "rule_expected", "recommended_order", "adjusted_order", "status"
     ]]
     
@@ -338,6 +346,8 @@ def render_product_table(forecast_df, date_str, store_id):
             "id": st.column_config.TextColumn("코드", disabled=True),
             "category": st.column_config.TextColumn("카테고리", disabled=True),
             "name": st.column_config.TextColumn("상품명", disabled=True),
+            "promotion_display": st.column_config.TextColumn("🎁 프로모션 여부", disabled=True),
+            "discount_display": st.column_config.TextColumn("🏷️ 할인율", disabled=True),
             "current_stock": st.column_config.NumberColumn("현재 재고 (개)", disabled=True),
             "safety_stock": st.column_config.NumberColumn("안전 재고 (개)", disabled=True),
             "ml_expected": st.column_config.NumberColumn("ML 예측 (개)", disabled=True),
@@ -367,7 +377,7 @@ def render_product_table(forecast_df, date_str, store_id):
 
     # 발주 확정: 이상치 탐지 후 팝업 또는 즉시 저장
     if st.button(
-        "🔥 최종 발주 수량 확정\n및 피드백 전송",
+        "🔥 최종 발주 수량 확정 및 피드백 전송",
         use_container_width=True,
         type="primary",
         key="submit_order_btn",
@@ -441,7 +451,7 @@ def render_chart(forecast_df):
     fig.add_trace(go.Bar(
         y=chart_df["name"],
         x=chart_df["base_sales"],
-        name="평시 기준 수요",
+        name="전국 편의점 평균 수요",
         orientation='h',
         marker=dict(
             color='#94a3b8', # slate gray
@@ -450,7 +460,7 @@ def render_chart(forecast_df):
         text=chart_df["base_sales"].apply(lambda x: f"{x}개"),
         textposition='outside',
         textfont=dict(color='#475569', size=9, family='Inter', weight='bold'),
-        hovertemplate="<b>%{y}</b><br>평시 기준수요: <b>%{x}개</b><extra></extra>"
+        hovertemplate="<b>%{y}</b><br>전국 편의점 평균수요: <b>%{x}개</b><extra></extra>"
     ))
     
     fig.update_layout(
@@ -490,8 +500,9 @@ def render_chart(forecast_df):
 def render_reasoning(forecast_df):
     st.markdown('<div class="sec-title">🧠 AI 발주 판단 세부 근거 (Decision Reasoning)</div>', unsafe_allow_html=True)
     
-    render_html('<div class="glass-card" style="padding: 20px;">')
-    render_html("""
+    html_lines = []
+    html_lines.append('<div class="glass-card" style="padding: 20px;">')
+    html_lines.append("""
     <div class="rules-header">
         <span>💡 상품별 기상/상권/주말 보정 요인 및 가설 분석</span>
     </div>
@@ -499,22 +510,25 @@ def render_reasoning(forecast_df):
     
     for _, row in forecast_df.iterrows():
         # Display each item reasons
-        render_html(f"""
-        <div class="rules-item">
-            <div style="display: flex; flex-direction: column; text-align: left;">
+        html_lines.append(f"""
+        <div class="rules-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(226, 232, 240, 0.5);">
+            <div style="display: flex; flex-direction: column; text-align: left; flex: 1; min-width: 0; margin-right: 16px;">
                 <span style="font-weight: 700; color: #0f172a;">{row['name']} <span style="font-size: 0.72rem; color: #475569; font-weight: normal;">({row['category']})</span></span>
-                <span style="font-size: 0.76rem; color: #475569; margin-top: 3px;">{row['reason']}</span>
+                <span style="font-size: 0.76rem; color: #475569; margin-top: 3px; word-break: keep-all; word-wrap: break-word; line-height: 1.35;">{row['reason']}</span>
             </div>
-            <div style="display: flex; flex-direction: column; align-items: flex-end;">
-                <span class="rules-tag" style="background: rgba(139, 92, 246, 0.05); color: #6d28d9;">위험도: {row['disposal_risk']} (안전재고 {row['safety_stock']}개)</span>
-                <span class="rules-val" style="color: #0f172a;">ML {row['expected_sales']}개 / 추천 {row['recommended_order']}개</span>
+            <div style="display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; min-width: 145px; text-align: right;">
+                <span class="rules-tag" style="background: rgba(139, 92, 246, 0.05); color: #6d28d9; white-space: nowrap;">위험도: {row['disposal_risk']} (안전재고 {row['safety_stock']}개)</span>
+                <span class="rules-val" style="color: #0f172a; margin-top: 4px; font-weight: 600; white-space: nowrap;">ML {row['expected_sales']}개 / 추천 {row['recommended_order']}개</span>
             </div>
         </div>
         """)
         
-    render_html('</div>')
+    html_lines.append('</div>')
+    
+    # Render all contents inside a single unified container to prevent auto-closing empty grids
+    render_html("\n".join(html_lines))
 
-def render_executive_report(forecast_df, weather, store_name, district, temp):
+def render_executive_report(forecast_df, weather, store_name, district, temp, rainfall=0.0):
     st.markdown('<div class="sec-title">📄 AI 자동 작성 종합 발주 분석 리포트</div>', unsafe_allow_html=True)
     
     danger_items = forecast_df[forecast_df["status"] == "품절 위험"]
@@ -522,16 +536,24 @@ def render_executive_report(forecast_df, weather, store_name, district, temp):
     top_orders = forecast_df.sort_values(by="recommended_order", ascending=False).head(3)
     top_orders = top_orders[top_orders["recommended_order"] > 0]
     
+    # Determine the weather dynamically based on physical values to ensure real-time reaction to sliders
+    if rainfall > 0.0:
+        active_weather = "비"
+    elif temp >= 30.0:
+        active_weather = "폭염"
+    else:
+        active_weather = "맑음"
+        
     # 1. Compose dynamic report paragraph
-    intro = f"금일 **{store_name}** 점포는 외부 기상 여건(<b>날씨: {weather} / 기온: {temp}℃</b>)과 <b>{district} 상권</b>의 요일별 유동인구 이동 패턴이 결합된 형태를 띠고 있습니다."
+    intro = f"금일 **{store_name}** 점포는 외부 기상 여건(<b>날씨 상태: {active_weather} / 기온: {temp}℃ / 강수량: {rainfall}mm</b>)과 <b>{district} 상권</b>의 요일별 유동인구 이동 패턴이 결합된 형태를 띠고 있습니다."
     
     # Weather specifics
-    if weather == "비":
-        weather_analysis = "전체적으로 강수 조건이 감지되어 잡화류 중 '우산'의 수요가 극대화되는 시점입니다. 아울러 야외 활동이 위축되고 습도가 증가함에 따라 뜨거운 국물류 간식인 '컵라면' 및 편의점 간편식인 '도시락'의 실내 수요 집중 현상이 강력하게 반영되고 있습니다. 반면 차가운 유제품 빙과류는 비로 인한 체감 기온 저하로 단기 위축세를 보입니다."
-    elif weather == "폭염":
-        weather_analysis = "평균 온도가 30도를 웃도는 혹서기 환경 영향에 따라 얼음컵, 생수, 아이스 아메리카노 등 수분 보충 및 차가운 음료 제품군의 예상 판매량이 급격하게 증가하는 양상을 보이고 있습니다. 반면 고온 환경으로 인해 뜨겁게 조리되는 컵라면 계열의 식사 대용품 판매량은 큰 폭의 기피 경향이 뚜렷하게 관측됩니다."
+    if active_weather == "비":
+        weather_analysis = f"전체적으로 강수 조건({rainfall}mm)이 감지되어 잡화류 중 '우산'의 수요가 극대화되는 시점입니다. 아울러 야외 활동이 위축되고 습도가 증가함에 따라 뜨거운 국물류 간식인 '컵라면' 및 편의점 간편식인 '도시락'의 실내 수요 집중 현상이 강력하게 반영되고 있습니다. 반면 차가운 유제품 빙과류는 비로 인한 체감 기온 저하로 단기 위축세를 보입니다."
+    elif active_weather == "폭염":
+        weather_analysis = f"평균 온도가 {temp}℃로 혹서기 기준(30℃)을 웃도는 혹서기 환경 영향에 따라 얼음컵, 생수, 아이스 아메리카노 등 수분 보충 및 차가운 음료 제품군의 예상 판매량이 급격하게 증가하는 양상을 보이고 있습니다. 반면 고온 환경으로 인해 뜨겁게 조리되는 컵라면 계열의 식사 대용품 판매량은 큰 폭의 기피 경향이 뚜렷하게 관측됩니다."
     else:
-        weather_analysis = "완만한 맑음 상태가 지속됨에 따라 빙과류(아이스크림) 및 시원한 주류(맥주)의 상시 소비 패턴이 균형감 있게 활성화되는 기조를 나타내고 있습니다."
+        weather_analysis = f"기온 {temp}℃의 완만한 맑음 상태가 지속됨에 따라 빙과류(아이스크림) 및 시원한 주류(맥주)의 상시 소비 패턴이 균형감 있게 활성화되는 기조를 나타내고 있습니다."
         
     # Expiration specifics
     fresh_warning = ""
@@ -547,8 +569,8 @@ def render_executive_report(forecast_df, weather, store_name, district, temp):
         reorder_list_html = "<ul>"
         for _, row in top_orders.iterrows():
             reason_tip = ""
-            if row["name"] == "우산" and weather == "비":
-                reason_tip = " (우천 시 최우선 권장)"
+            if row["name"] == "우산" and active_weather == "비":
+                reason_tip = f" (우천 강수량 {rainfall}mm 대응 최우선 권장)"
             elif row["shelf_life_type"] == "FF":
                 reason_tip = " (폐기 위험 고려 타이트한 안전재고 반영)"
             else:
@@ -709,3 +731,46 @@ def render_footer():
         Convenience Smart Demand forecasting System | Powered by Antigravity AI Engine
     </div>
     """)
+
+def render_top_products_view():
+    st.markdown('<div class="sec-title">🔥 실시간 인기 상품(Top 10) 트렌드 분석</div>', unsafe_allow_html=True)
+    st.write("과거 판매 실적 데이터를 실시간 집계하여 도출된 판매 주기별 인기 품목 순위입니다.")
+    
+    sub_t1, sub_t2, sub_t3 = st.tabs(["📅 일간 인기 상품", "📅 주간 인기 상품", "📅 월간 인기 상품"])
+    
+    from logic import get_top_products
+    
+    for period, tab in zip(["daily", "weekly", "monthly"], [sub_t1, sub_t2, sub_t3]):
+        with tab:
+            top_df = get_top_products(period)
+            if top_df.empty:
+                st.info("💡 집계할 판매 데이터가 부족합니다.")
+                continue
+                
+            top_df = top_df.copy()
+            top_df.insert(0, "순위", range(1, len(top_df) + 1))
+            top_df = top_df.rename(columns={
+                "product_name": "상품명",
+                "category": "카테고리",
+                "sales_qty": "누적 판매량 (개)",
+                "unit_price": "가격 (원)"
+            })
+            
+            # Decorate ranks with emojis
+            decorated_ranks = []
+            for rank in top_df["순위"]:
+                if rank == 1:
+                    decorated_ranks.append(f"🥇 1위")
+                elif rank == 2:
+                    decorated_ranks.append(f"🥈 2위")
+                elif rank == 3:
+                    decorated_ranks.append(f"🥉 3위")
+                else:
+                    decorated_ranks.append(f"⭐ {rank}위")
+            top_df["순위"] = decorated_ranks
+            
+            st.dataframe(
+                top_df[["순위", "product_id", "상품명", "카테고리", "가격 (원)", "누적 판매량 (개)"]],
+                use_container_width=True,
+                hide_index=True
+            )

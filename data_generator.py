@@ -47,16 +47,56 @@ def generate_synthesized_data():
     
     # 2. Product Master Data (product_info)
     products = [
-        {"product_id": "P01", "product_name": "도시락", "category": "식사", "shelf_life_type": "FF", "disposal_risk": "HIGH", "unit_price": 4800},
-        {"product_id": "P02", "product_name": "아메리카노", "category": "음료", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 2000},
-        {"product_id": "P03", "product_name": "우산", "category": "잡화", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 6000},
-        {"product_id": "P04", "product_name": "생수", "category": "음료", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 1000},
-        {"product_id": "P05", "product_name": "얼음컵", "category": "음료", "shelf_life_type": "FF", "disposal_risk": "MEDIUM", "unit_price": 800},
-        {"product_id": "P06", "product_name": "컵라면", "category": "식사", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 1500},
-        {"product_id": "P07", "product_name": "샌드위치", "category": "식사", "shelf_life_type": "FF", "disposal_risk": "HIGH", "unit_price": 2900},
-        {"product_id": "P08", "product_name": "맥주", "category": "주류", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 3500},
-        {"product_id": "P09", "product_name": "아이스크림", "category": "간식", "shelf_life_type": "FF", "disposal_risk": "MEDIUM", "unit_price": 1200},
-        {"product_id": "P10", "product_name": "핫바", "category": "간식", "shelf_life_type": "FF", "disposal_risk": "MEDIUM", "unit_price": 2200},
+        {
+            "product_id": "P01", "product_name": "도시락", "category": "식사", "shelf_life_type": "FF", "disposal_risk": "HIGH", "unit_price": 4800,
+            "original_price": 4800, "discount_price": 4800, "discount_rate": 0.0, "promotion_type": "None", "is_1plus1": False, "is_2plus1": False,
+            "promotion_start_date": "None", "promotion_end_date": "None"
+        },
+        {
+            "product_id": "P02", "product_name": "아메리카노", "category": "음료", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 2000,
+            "original_price": 2000, "discount_price": 2000, "discount_rate": 0.0, "promotion_type": "1+1", "is_1plus1": True, "is_2plus1": False,
+            "promotion_start_date": "2026-05-01", "promotion_end_date": "2026-05-31"
+        },
+        {
+            "product_id": "P03", "product_name": "우산", "category": "잡화", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 6000,
+            "original_price": 6000, "discount_price": 6000, "discount_rate": 0.0, "promotion_type": "None", "is_1plus1": False, "is_2plus1": False,
+            "promotion_start_date": "None", "promotion_end_date": "None"
+        },
+        {
+            "product_id": "P04", "product_name": "생수", "category": "음료", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 1000,
+            "original_price": 1000, "discount_price": 1000, "discount_rate": 0.0, "promotion_type": "None", "is_1plus1": False, "is_2plus1": False,
+            "promotion_start_date": "None", "promotion_end_date": "None"
+        },
+        {
+            "product_id": "P05", "product_name": "얼음컵", "category": "음료", "shelf_life_type": "FF", "disposal_risk": "MEDIUM", "unit_price": 800,
+            "original_price": 800, "discount_price": 800, "discount_rate": 0.0, "promotion_type": "None", "is_1plus1": False, "is_2plus1": False,
+            "promotion_start_date": "None", "promotion_end_date": "None"
+        },
+        {
+            "product_id": "P06", "product_name": "컵라면", "category": "식사", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 1500,
+            "original_price": 1500, "discount_price": 1500, "discount_rate": 0.0, "promotion_type": "2+1", "is_1plus1": False, "is_2plus1": True,
+            "promotion_start_date": "2026-05-15", "promotion_end_date": "2026-05-25"
+        },
+        {
+            "product_id": "P07", "product_name": "샌드위치", "category": "식사", "shelf_life_type": "FF", "disposal_risk": "HIGH", "unit_price": 2900,
+            "original_price": 2900, "discount_price": 2300, "discount_rate": 0.21, "promotion_type": "할인", "is_1plus1": False, "is_2plus1": False,
+            "promotion_start_date": "2026-05-20", "promotion_end_date": "2026-05-30"
+        },
+        {
+            "product_id": "P08", "product_name": "맥주", "category": "주류", "shelf_life_type": "DRY", "disposal_risk": "LOW", "unit_price": 3500,
+            "original_price": 3500, "discount_price": 3500, "discount_rate": 0.0, "promotion_type": "None", "is_1plus1": False, "is_2plus1": False,
+            "promotion_start_date": "None", "promotion_end_date": "None"
+        },
+        {
+            "product_id": "P09", "product_name": "아이스크림", "category": "간식", "shelf_life_type": "FF", "disposal_risk": "MEDIUM", "unit_price": 1200,
+            "original_price": 1200, "discount_price": 1200, "discount_rate": 0.0, "promotion_type": "1+1", "is_1plus1": True, "is_2plus1": False,
+            "promotion_start_date": "2026-05-01", "promotion_end_date": "2026-05-31"
+        },
+        {
+            "product_id": "P10", "product_name": "핫바", "category": "간식", "shelf_life_type": "FF", "disposal_risk": "MEDIUM", "unit_price": 2200,
+            "original_price": 2200, "discount_price": 2200, "discount_rate": 0.0, "promotion_type": "None", "is_1plus1": False, "is_2plus1": False,
+            "promotion_start_date": "None", "promotion_end_date": "None"
+        },
     ]
     pd.DataFrame(products).to_csv("data/sample_product.csv", index=False, encoding="utf-8-sig")
     
@@ -306,7 +346,15 @@ def generate_synthesized_data():
                     "stock_qty": stock,
                     "disposed_qty": disposed,
                     "sold_out": sold_out,
-                    "sold_out_time": sold_out_time if sold_out == 1 else ""
+                    "sold_out_time": sold_out_time if sold_out == 1 else "",
+                    "original_price": prod["original_price"],
+                    "discount_price": prod["discount_price"],
+                    "discount_rate": prod["discount_rate"],
+                    "promotion_type": prod["promotion_type"],
+                    "is_1plus1": prod["is_1plus1"],
+                    "is_2plus1": prod["is_2plus1"],
+                    "promotion_start_date": prod["promotion_start_date"],
+                    "promotion_end_date": prod["promotion_end_date"]
                 })
                 
     sales_df = pd.DataFrame(sales_history)

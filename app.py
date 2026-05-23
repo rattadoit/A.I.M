@@ -15,6 +15,7 @@ from ui import (
     render_feedback_analysis_tab,
     render_footer,
     init_order_session_state,
+    render_top_products_view,
 )
 
 # 1. Streamlit Caching for Prediction Engine (prevents retraining on every widget slide!)
@@ -64,8 +65,9 @@ def main():
     )
     
     # 7. Navigation Tabs
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "🏪 실시간 스마트 발주 추천", 
+        "🔥 인기 상품 트렌드 분석",
         "📊 피드백 분석 & SQLite 이력", 
         "🔍 데이터 스키마 & 원본 CSV 탐색"
     ])
@@ -79,30 +81,36 @@ def main():
         
         st.write("") # Spacer
         
-        # Dual-column interactive view
+        # 1. Detailed prediction table spanning full page width for wide layout
+        render_product_table(forecast_df, date_str, store_id)
+        
+        st.write("") # Spacer between Table and bottom section
+        
+        # 2. Dual-column split for report, chart, and heuristics log
         col_left, col_right = st.columns([5, 4])
         
         with col_left:
-            # Interactive Grid with Owner adjustment & database save trigger
-            render_product_table(forecast_df, date_str, store_id)
-            
-            st.write("") # Spacer
-            
             # Dynamic Heuristic & ML summary text generator
-            render_executive_report(forecast_df, weather, store_name, district, temp)
+            render_executive_report(forecast_df, weather, store_name, district, temp, rainfall)
             
-        with col_right:
-            # Top order suggestions bar charts
+            st.write("") # Spacer below report
+            
+            # Real-time Weather/District feature reaction horizontal bar chart
             render_chart(forecast_df)
             
+        with col_right:
             # Decision heuristics detail log
             render_reasoning(forecast_df)
         
     with tab2:
+        # Render real-time Popularity trends
+        render_top_products_view()
+        
+    with tab3:
         # Render database log metrics and correlation scatterplots
         render_feedback_analysis_tab()
         
-    with tab3:
+    with tab4:
         st.markdown('<div class="sec-title">🔍 시스템 원본 데이터 및 스키마 탐색기</div>', unsafe_allow_html=True)
         
         st.write("본 대시보드는 합성 생성기(`data_generator.py`)가 만든 과거 60일치 판매 내역과 날씨 데이터를 로드하여 구동됩니다. 아래 서브 탭을 통해 원본 데이터를 확인할 수 있습니다.")
