@@ -375,6 +375,37 @@ def render_product_table(forecast_df, date_str, store_id):
         
     st.write("")
 
+    if "moving_average_7d" in display_df.columns:
+        with st.expander("🕐 시간·요일별 수요 피처 (ML·발주에 반영됨)", expanded=False):
+            temporal_cols = [
+                "name", "hour", "day_label", "is_weekend", "is_holiday",
+                "previous_day_sales", "previous_week_sales",
+                "moving_average_7d", "moving_average_28d",
+                "demand_commute_morning", "demand_lunch", "demand_commute_evening", "demand_night",
+                "peak_period", "temporal_mult",
+            ]
+            avail = [c for c in temporal_cols if c in display_df.columns]
+            tview = display_df[avail].copy()
+            rename_map = {
+                "name": "상품",
+                "hour": "hour (피크)",
+                "day_label": "day_of_week",
+                "is_weekend": "is_weekend",
+                "is_holiday": "is_holiday",
+                "previous_day_sales": "previous_day_sales",
+                "previous_week_sales": "previous_week_sales",
+                "moving_average_7d": "moving_average_7d",
+                "moving_average_28d": "moving_average_28d",
+                "demand_commute_morning": "출근 수요",
+                "demand_lunch": "점심 수요",
+                "demand_commute_evening": "퇴근 수요",
+                "demand_night": "야간 수요",
+                "peak_period": "피크 시간대",
+                "temporal_mult": "시간·요일 보정계수",
+            }
+            tview = tview.rename(columns={k: rename_map.get(k, k) for k in tview.columns})
+            st.dataframe(tview, use_container_width=True, hide_index=True)
+
     # 발주 확정: 이상치 탐지 후 팝업 또는 즉시 저장
     if st.button(
         "🔥 최종 발주 수량 확정 및 피드백 전송",
@@ -723,6 +754,131 @@ def render_feedback_analysis_tab():
         else:
             st.caption("차트를 그릴 데이터가 부족합니다.")
             
+def render_temporal_demand_view(engine, store_id, date_str, forecast_df, district):
+    """POINT 2: 시간대·요일별 수요 예측 — 명세 변수 시각화."""
+    st.caption(
+        "판매 데이터를 **hour · day_of_week · is_weekend · is_holiday** 및 "
+        "**previous_day_sales · previous_week_sales · moving_average_7d/28d** 와 함께 분석하고, "
+        "**출근·점심·퇴근·야간** 시간대별 수요를 Random Forest 예측·발주 추천에 반영합니다."
+    )
+
+    render_html("""
+    <div class="glass-card temporal-pipeline-card">
+        <div class="rules-header"><span>📌 시간·요일 수요 예측 파이프라인 (로직 반영)</span></div>
+        <div class="temporal-pipeline-steps">
+            <div class="pipeline-step"><span class="step-num">1</span>시간별 판매 CSV</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step"><span class="step-num">2</span>hour / 요일 / 공휴일</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step"><span class="step-num">3</span>MA7 · MA28 · 전일·전주</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step"><span class="step-num">4</span>출근·점심·퇴근·야간</div>
+            <div class="pipeline-arrow">→</div>
+            <div class="pipeline-step"><span class="step-num">5</span>ML + 발주량 보정</div>
+        </div>
+    </div>
+    """)
+
+    feature_spec = pd.DataFrame([
+        {"변수": "hour", "설명": "피크 판매 시각 (0–23)", "로직 반영": "RF 학습 피처 + 상권 보정"},
+        {"변수": "day_of_week", "설명": "요일 (0=월 … 6=일)", "로직 반영": "RF 학습 피처"},
+        {"변수": "is_weekend", "설명": "주말 여부 (0/1)", "로직 반영": "RF + 상권 주말 감쇠"},
+        {"변수": "is_holiday", "설명": "공휴일 여부 (0/1)", "로직 반영": "RF + 공휴일 배수"},
+        {"변수": "previous_day_sales", "설명": "전일 판매량", "로직 반영": "RF 학습 피처"},
+        {"변수": "previous_week_sales", "설명": "전주 동일일 판매", "로직 반영": "RF 학습 피처"},
+        {"변수": "moving_average_7d", "설명": "7일 이동평균", "로직 반영": "RF + MA7/MA28 비율 보정"},
+        {"변수": "moving_average_28d", "설명": "28일 이동평균", "로직 반영": "RF + 발주 근거 문구"},
+        {"변수": "출근·점심·퇴근·야간", "설명": "시간대별 예상 수요", "로직 반영": "상권 temporal_mult"},
+    ])
+    st.dataframe(feature_spec, use_container_width=True, hide_index=True)
+
+    date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+    day_label = forecast_df["day_label"].iloc[0] if "day_label" in forecast_df.columns else ["월", "화", "수", "목", "금", "토", "일"][date_obj.weekday()]
+    is_hol = int(forecast_df["is_holiday"].iloc[0]) if "is_holiday" in forecast_df.columns else 0
+    is_wknd = int(forecast_df["is_weekend"].iloc[0]) if "is_weekend" in forecast_df.columns else 0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("분석 요일 (day_of_week)", day_label)
+    m2.metric("is_weekend", "예" if is_wknd else "아니오")
+    m3.metric("is_holiday", "예" if is_hol else "아니오")
+    m4.metric("상권", district)
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("**🛒 상품별 명세 변수 스냅샷**")
+        snap_cols = [
+            "name", "hour", "day_label", "is_weekend", "is_holiday",
+            "previous_day_sales", "previous_week_sales",
+            "moving_average_7d", "moving_average_28d", "expected_sales",
+        ]
+        avail = [c for c in snap_cols if c in forecast_df.columns]
+        if avail:
+            snap = forecast_df[avail].copy()
+            snap.columns = [
+                "상품", "hour", "요일", "주말", "공휴일",
+                "전일판매", "전주판매", "MA7", "MA28", "최종 예상판매",
+            ][: len(avail)]
+            st.dataframe(snap, use_container_width=True, hide_index=True)
+
+    with col_b:
+        st.markdown("**⏰ 출근·점심·퇴근·야간 예상 수요 (상위 5 SKU)**")
+        period_cols = ["name", "demand_commute_morning", "demand_lunch", "demand_commute_evening", "demand_night", "peak_period"]
+        pavail = [c for c in period_cols if c in forecast_df.columns]
+        if len(pavail) >= 2:
+            top5 = forecast_df.nlargest(5, "expected_sales")[pavail].copy()
+            top5.columns = ["상품", "출근(7–11)", "점심(11–14)", "퇴근(17–20)", "야간(21–24)", "피크"][: len(pavail)]
+            st.dataframe(top5, use_container_width=True, hide_index=True)
+            fig_period = go.Figure()
+            period_labels = ["출근", "점심", "퇴근", "야간"]
+            for _, row in top5.head(3).iterrows():
+                vals = [float(row[c]) for c in top5.columns[1:5] if c in row.index]
+                while len(vals) < 4:
+                    vals.append(0.0)
+                fig_period.add_trace(go.Bar(
+                    name=str(row[top5.columns[0]]),
+                    x=period_labels,
+                    y=vals[:4],
+                ))
+            fig_period.update_layout(
+                barmode="group",
+                height=300,
+                title="시간대별 수요 (예측 반영값)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(248,250,252,0.5)",
+            )
+            st.plotly_chart(fig_period, use_container_width=True, config={"displayModeBar": False})
+
+    hourly_df = getattr(engine, "hourly_sales_df", None)
+    if hasattr(engine, "ensure_hourly_sales_loaded"):
+        engine.ensure_hourly_sales_loaded()
+        hourly_df = getattr(engine, "hourly_sales_df", None)
+    if hourly_df is not None and not hourly_df.empty:
+        from temporal_features import hour_in_period, COMMUTE_PERIODS
+
+        st.markdown("**📈 점포 시간대별 실제 판매 (최근 14일)**")
+        h = hourly_df.copy()
+        h["date"] = pd.to_datetime(h["date"])
+        h = h[(h["store_id"] == store_id) & (h["date"] >= pd.to_datetime(date_str) - pd.Timedelta(days=14))]
+        if not h.empty:
+            period_totals = {}
+            for pname in COMMUTE_PERIODS:
+                mask = h["hour"].apply(lambda x, p=pname: hour_in_period(int(x), p))
+                period_totals[pname] = float(h.loc[mask, "sales_qty"].sum())
+            fig_commute = go.Figure(go.Bar(
+                x=list(period_totals.keys()),
+                y=list(period_totals.values()),
+                marker_color=["#6366f1", "#8b5cf6", "#a855f7", "#c084fc"],
+            ))
+            fig_commute.update_layout(
+                height=280,
+                xaxis_title="시간대 구간",
+                yaxis_title="판매량 합계 (개)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(248,250,252,0.5)",
+            )
+            st.plotly_chart(fig_commute, use_container_width=True, config={"displayModeBar": False})
+
+
 def render_footer():
     render_html("""
     <div style="text-align: center; margin-top: 40px; padding: 20px 0; border-top: 1px solid rgba(226, 232, 240, 0.8); color: #475569; font-size: 0.78rem; font-weight: 500;">

@@ -359,7 +359,18 @@ def generate_synthesized_data():
                 
     sales_df = pd.DataFrame(sales_history)
     sales_df.to_csv("data/sample_sales.csv", index=False, encoding="utf-8-sig")
-    print(f"Data generation complete! Saved files to 'data/' folder. Total sales records: {len(sales_df)}")
+
+    # 6. 시간대별 판매 이력 (시간·요일 패턴 학습용)
+    from temporal_features import build_hourly_sales_from_daily
+    product_df = pd.read_csv("data/sample_product.csv")
+    store_df = pd.read_csv("data/sample_store.csv")
+    hourly_df = build_hourly_sales_from_daily(sales_df, store_df, product_df)
+    hourly_df.to_csv("data/sample_hourly_sales.csv", index=False, encoding="utf-8-sig")
+
+    print(
+        f"Data generation complete! Sales: {len(sales_df)} rows, "
+        f"Hourly: {len(hourly_df)} rows → data/"
+    )
 
 if __name__ == "__main__":
     generate_synthesized_data()

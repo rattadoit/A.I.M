@@ -16,13 +16,15 @@ from ui import (
     render_footer,
     init_order_session_state,
     render_top_products_view,
+    render_temporal_demand_view,
 )
 
 # 1. Streamlit Caching for Prediction Engine (prevents retraining on every widget slide!)
 @st.cache_resource
-def load_and_train_prediction_engine():
+def load_prediction_engine_v2():
     engine = PredictionEngine()
     engine.train_model()
+    engine.ensure_hourly_sales_loaded()
     return engine
 
 def main():
@@ -37,7 +39,7 @@ def main():
     
     # 4. Initialize ML Engine
     try:
-        engine = load_and_train_prediction_engine()
+        engine = load_prediction_engine_v2()
     except Exception as e:
         st.error(f"🚨 머신러닝 엔진 초기화 및 학습에 실패했습니다: {e}")
         st.info("데이터 파일이 올바르게 생성되었는지 확인해 주세요.")
@@ -78,7 +80,7 @@ def main():
         
         # Metric Rows
         render_kpi(forecast_df)
-        
+
         st.write("") # Spacer
         
         # 1. Detailed prediction table spanning full page width for wide layout
@@ -101,6 +103,10 @@ def main():
         with col_right:
             # Decision heuristics detail log
             render_reasoning(forecast_df)
+
+        # 시간·요일별 수요 예측 (접이식 — 기존 레이아웃 유지)
+        with st.expander("🕐 시간대·요일별 수요 예측 상세", expanded=False):
+            render_temporal_demand_view(engine, store_id, date_str, forecast_df, district)
         
     with tab2:
         # Render real-time Popularity trends

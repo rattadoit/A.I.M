@@ -4,12 +4,20 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
 from config import BASELINE_PRODUCTS
+from temporal_features import (
+    compute_temporal_demand_features,
+    get_trade_area_temporal_multiplier,
+    get_holiday_demand_multiplier,
+    build_hourly_sales_from_daily,
+    DAY_LABELS,
+)
 
 # Paths for CSV files
 PRODUCT_CSV = "data/sample_product.csv"
 STORE_CSV = "data/sample_store.csv"
 WEATHER_CSV = "data/sample_weather.csv"
 SALES_CSV = "data/sample_sales.csv"
+HOURLY_SALES_CSV = "data/sample_hourly_sales.csv"
 
 LOCATION_DEFAULTS = {
     "latitude": 37.5665,
@@ -39,15 +47,35 @@ class PredictionEngine:
         self.label_encoders = {}
         self.feature_cols = [
             "temperature", "humidity", "rainy", "rainfall",
-            "day_of_week", "is_weekend",
+            "hour", "day_of_week", "is_weekend", "is_holiday",
+            "previous_day_sales", "previous_week_sales",
+            "moving_average_7d", "moving_average_28d",
+            "commute_morning_share", "lunch_share", "commute_evening_share", "night_share",
             "cat_encoded", "dist_encoded", "area_encoded", "prod_encoded",
             *LOCATION_NUMERIC_FEATURES,
-            "recent_7d_avg", "recent_4w_weekday_avg"
         ]
         self.sales_df = None
         self.weather_df = None
         self.product_df = None
         self.store_df = None
+        self.hourly_sales_df = None
+
+    def ensure_hourly_sales_loaded(self):
+        """캐시된 구버전 엔진 등 hourly_sales_df가 없을 때 보완 로드."""
+        if getattr(self, "hourly_sales_df", None) is not None:
+            return
+        if self.sales_df is None:
+            self.load_data()
+            return
+        if os.path.exists(HOURLY_SALES_CSV):
+            self.hourly_sales_df = pd.read_csv(HOURLY_SALES_CSV)
+            self.hourly_sales_df["date"] = pd.to_datetime(self.hourly_sales_df["date"])
+        else:
+            self.hourly_sales_df = build_hourly_sales_from_daily(
+                self.sales_df, self.store_df, self.product_df
+            )
+            os.makedirs("data", exist_ok=True)
+            self.hourly_sales_df.to_csv(HOURLY_SALES_CSV, index=False, encoding="utf-8-sig")
         
     def load_data(self):
         """Loads and pre-processes files, computing rolling averages for ML training."""
@@ -61,12 +89,24 @@ class PredictionEngine:
         self.store_df = pd.read_csv(STORE_CSV)
         self.weather_df = pd.read_csv(WEATHER_CSV)
         self.sales_df = pd.read_csv(SALES_CSV)
+        self.hourly_sales_df = None
 
         self.store_df = self.ensure_location_features(self.store_df)
         
         # Parse dates
         self.sales_df["date"] = pd.to_datetime(self.sales_df["date"])
         self.weather_df["date"] = pd.to_datetime(self.weather_df["date"])
+
+        # 시간대별 판매 이력 로드 (없으면 일별 데이터에서 합성)
+        if os.path.exists(HOURLY_SALES_CSV):
+            self.hourly_sales_df = pd.read_csv(HOURLY_SALES_CSV)
+            self.hourly_sales_df["date"] = pd.to_datetime(self.hourly_sales_df["date"])
+        else:
+            self.hourly_sales_df = build_hourly_sales_from_daily(
+                self.sales_df, self.store_df, self.product_df
+            )
+            os.makedirs("data", exist_ok=True)
+            self.hourly_sales_df.to_csv(HOURLY_SALES_CSV, index=False, encoding="utf-8-sig")
 
     def ensure_location_features(self, store_df):
         """Adds prototype location columns when older sample data is loaded."""
@@ -91,24 +131,67 @@ class PredictionEngine:
         # Merge weather
         df = df.merge(self.weather_df, on="date", how="left")
         
-        # Date parts
+        # Date parts — 시간·요일·공휴일 피처
+        from temporal_features import is_holiday
         df["day_of_week"] = df["date"].dt.weekday
-        df["is_weekend"] = df["day_of_week"].apply(lambda x: 1 if x >= 5 else 0)
-        
-        # 2. Historical Feature Engineering (Shifted to prevent data leakage!)
+        df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
+        df["is_holiday"] = df["date"].dt.strftime("%Y-%m-%d").apply(is_holiday)
+
         df = df.sort_values(by=["store_id", "product_id", "date"])
-        
-        # Recent 7d average
-        df["recent_7d_avg"] = df.groupby(["store_id", "product_id"])["sales_qty"] \
-                                .transform(lambda x: x.shift(1).rolling(7, min_periods=1).mean())
-        
-        # Recent 4w same day-of-week average
-        df["recent_4w_weekday_avg"] = df.groupby(["store_id", "product_id", "day_of_week"])["sales_qty"] \
-                                        .transform(lambda x: x.shift(1).rolling(4, min_periods=1).mean())
-        
-        # Fill NaN values (mostly the first few days of history)
-        df["recent_7d_avg"] = df["recent_7d_avg"].fillna(df["sales_qty"].mean())
-        df["recent_4w_weekday_avg"] = df["recent_4w_weekday_avg"].fillna(df["sales_qty"].mean())
+        g = df.groupby(["store_id", "product_id"])["sales_qty"]
+
+        df["previous_day_sales"] = g.shift(1)
+        df["previous_week_sales"] = g.shift(7)
+        df["moving_average_7d"] = g.transform(lambda x: x.shift(1).rolling(7, min_periods=1).mean())
+        df["moving_average_28d"] = g.transform(lambda x: x.shift(1).rolling(28, min_periods=1).mean())
+
+        fill_val = df["sales_qty"].mean()
+        for col in ["previous_day_sales", "previous_week_sales", "moving_average_7d", "moving_average_28d"]:
+            df[col] = df[col].fillna(fill_val)
+
+        df["hour"] = 12
+        df["commute_morning_share"] = 0.15
+        df["lunch_share"] = 0.30
+        df["commute_evening_share"] = 0.20
+        df["night_share"] = 0.15
+
+        if self.hourly_sales_df is not None and not self.hourly_sales_df.empty:
+            h = self.hourly_sales_df.copy()
+            h["date"] = pd.to_datetime(h["date"])
+            from temporal_features import hour_in_period
+
+            def _period_share(frame, period):
+                mask = frame["hour"].apply(lambda x: hour_in_period(int(x), period))
+                return frame[mask].groupby(["store_id", "product_id", "date"])["sales_qty"].sum()
+
+            totals = h.groupby(["store_id", "product_id", "date"])["sales_qty"].sum().reset_index(name="day_total")
+            m = _period_share(h, "출근").reset_index(name="m_qty")
+            l = _period_share(h, "점심").reset_index(name="l_qty")
+            ev = _period_share(h, "퇴근").reset_index(name="e_qty")
+            n = _period_share(h, "야간").reset_index(name="n_qty")
+            by_hour = h.groupby(["store_id", "product_id", "date", "hour"])["sales_qty"].sum().reset_index()
+            ph = (
+                by_hour.sort_values("sales_qty", ascending=False)
+                .groupby(["store_id", "product_id", "date"], as_index=False)
+                .first()[["store_id", "product_id", "date", "hour"]]
+            )
+
+            slot_df = totals.merge(m, how="left").merge(l, how="left").merge(ev, how="left").merge(n, how="left").merge(ph, how="left")
+            slot_df = slot_df.fillna(0)
+            slot_df["day_total"] = slot_df["day_total"].replace(0, 1)
+            slot_df["commute_morning_share"] = slot_df["m_qty"] / slot_df["day_total"]
+            slot_df["lunch_share"] = slot_df["l_qty"] / slot_df["day_total"]
+            slot_df["commute_evening_share"] = slot_df["e_qty"] / slot_df["day_total"]
+            slot_df["night_share"] = slot_df["n_qty"] / slot_df["day_total"]
+            slot_df = slot_df[["store_id", "product_id", "date", "hour", "commute_morning_share", "lunch_share", "commute_evening_share", "night_share"]]
+
+            df = df.drop(columns=["hour", "commute_morning_share", "lunch_share", "commute_evening_share", "night_share"], errors="ignore")
+            df = df.merge(slot_df, on=["store_id", "product_id", "date"], how="left")
+            for col in ["hour", "commute_morning_share", "lunch_share", "commute_evening_share", "night_share"]:
+                df[col] = df.groupby(["store_id", "product_id"])[col].shift(1)
+            df["hour"] = df["hour"].fillna(12).astype(int)
+            for col in ["commute_morning_share", "lunch_share", "commute_evening_share", "night_share"]:
+                df[col] = df[col].fillna(0.2)
         
         # 3. Label Encoding
         for col, new_col in [
@@ -140,6 +223,7 @@ class PredictionEngine:
         """Predicts sales using the trained Random Forest regressor."""
         if self.model is None:
             self.train_model()
+        self.ensure_hourly_sales_loaded()
             
         date_obj = datetime.datetime.strptime(target_date_str, "%Y-%m-%d")
         day_of_week = date_obj.weekday()
@@ -164,32 +248,30 @@ class PredictionEngine:
             # Fetch rolling history for this store/product up to the latest date
             sub_sales = self.sales_df[(self.sales_df["store_id"] == store_id) & (self.sales_df["product_id"] == p_id)]
             
-            if not sub_sales.empty:
-                recent_7d = sub_sales.tail(7)["sales_qty"].mean()
-                
-                # Filter same weekday in history
-                self.sales_df["day_of_week"] = pd.to_datetime(self.sales_df["date"]).dt.weekday
-                weekday_sales = self.sales_df[(self.sales_df["store_id"] == store_id) & 
-                                              (self.sales_df["product_id"] == p_id) & 
-                                              (self.sales_df["day_of_week"] == day_of_week)]
-                recent_4w = weekday_sales.tail(4)["sales_qty"].mean() if not weekday_sales.empty else recent_7d
-            else:
-                recent_7d = p["base_sales"]
-                recent_4w = p["base_sales"]
-                
+            temporal = compute_temporal_demand_features(
+                self.sales_df, store_id, p_id, target_date_str, self.hourly_sales_df
+            )
             feature_values = {
                 "temperature": temp,
                 "humidity": humidity,
                 "rainy": is_rainy,
                 "rainfall": rainfall,
-                "day_of_week": day_of_week,
-                "is_weekend": is_weekend,
+                "hour": temporal["hour"],
+                "day_of_week": temporal["day_of_week"],
+                "is_weekend": temporal["is_weekend"],
+                "is_holiday": temporal["is_holiday"],
+                "previous_day_sales": temporal["previous_day_sales"],
+                "previous_week_sales": temporal["previous_week_sales"],
+                "moving_average_7d": temporal["moving_average_7d"] or p["base_sales"],
+                "moving_average_28d": temporal["moving_average_28d"] or p["base_sales"],
+                "commute_morning_share": temporal["morning_ratio"],
+                "lunch_share": temporal["lunch_ratio"],
+                "commute_evening_share": temporal["evening_ratio"] * 0.6,
+                "night_share": temporal["evening_ratio"] * 0.4,
                 "cat_encoded": cat_enc,
                 "dist_encoded": dist_enc,
                 "area_encoded": area_enc,
                 "prod_encoded": prod_enc,
-                "recent_7d_avg": recent_7d,
-                "recent_4w_weekday_avg": recent_4w,
             }
             for col in LOCATION_NUMERIC_FEATURES:
                 feature_values[col] = float(store_row[col])
@@ -529,6 +611,7 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
     Integrates ML models and Heuristics predictions. Calculates safety stock,
     safety-stock flags, recommended orders, and return values in a DataFrame.
     """
+    engine.ensure_hourly_sales_loaded()
     # 1. Day information
     date_obj = datetime.datetime.strptime(target_date_str, "%Y-%m-%d")
     day_of_week = date_obj.weekday()
@@ -600,8 +683,26 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
         default_factor = get_continuous_weather_factor(p_name, def_temp, def_hum, def_rain)
         relative_mult = current_factor / default_factor
         
-        # Blended expected sales with weather continuous gliding and active promotion multipliers
-        expected_sales = round(float(ml_expected * relative_mult * promo_multiplier), 1)
+        # 시간·요일·공휴일·상권 패턴 보정
+        temporal = compute_temporal_demand_features(
+            engine.sales_df, store_id, p_id, target_date_str, engine.hourly_sales_df
+        )
+        temporal_mult, temporal_reason = get_trade_area_temporal_multiplier(
+            store_row["trade_area_type"],
+            p_name,
+            day_of_week,
+            temporal.get("peak_time_slot"),
+            temporal.get("is_holiday", 0),
+        )
+        holiday_mult = get_holiday_demand_multiplier(temporal.get("is_holiday", 0))
+        ma_ratio = 1.0
+        if temporal["moving_average_28d"] > 0:
+            ma_ratio = temporal["moving_average_7d"] / temporal["moving_average_28d"]
+        ma_ratio = max(0.85, min(1.15, ma_ratio))
+
+        expected_sales = round(
+            float(ml_expected * relative_mult * promo_multiplier * temporal_mult * holiday_mult * ma_ratio), 1
+        )
         
         # Safety Stock calculation
         safety_stock = get_dynamic_safety_stock(shelf_life, disposal_risk, expected_sales)
@@ -626,6 +727,12 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
         if p_id in weekly_top_ids:
             reasons_list.append("🔥 주간 인기상품")
             
+        if temporal_reason:
+            reasons_list.append(f"🕐 {temporal_reason}")
+        reasons_list.append(
+            f"시간·요일 반영(MA7={temporal['moving_average_7d']}, MA28={temporal['moving_average_28d']})"
+        )
+
         if reasons_list:
             recommend_reason = " & ".join(reasons_list)
         else:
@@ -658,7 +765,26 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
             "promotion_end_date": str(prod_row.get("promotion_end_date", "None")),
             "recommend_reason": recommend_reason,
             "relative_mult": relative_mult,
-            "promo_multiplier": promo_multiplier
+            "promo_multiplier": promo_multiplier,
+            "day_label": temporal.get("day_label", DAY_LABELS[day_of_week]),
+            "is_weekend": temporal.get("is_weekend", 0),
+            "is_holiday": temporal.get("is_holiday", 0),
+            "hour": temporal.get("hour", 12),
+            "previous_day_sales": temporal.get("previous_day_sales", 0),
+            "previous_week_sales": temporal.get("previous_week_sales", 0),
+            "moving_average_7d": temporal.get("moving_average_7d", 0),
+            "moving_average_28d": temporal.get("moving_average_28d", 0),
+            "recent_7d_avg": temporal.get("moving_average_7d", 0),
+            "recent_4w_weekday_avg": temporal.get("recent_4w_weekday_avg", 0),
+            "peak_time_slot": temporal.get("peak_time_slot", temporal.get("peak_period", "")),
+            "peak_period": temporal.get("peak_period", "점심"),
+            "demand_commute_morning": temporal.get("demand_commute_morning", 0),
+            "demand_lunch": temporal.get("demand_lunch", 0),
+            "demand_commute_evening": temporal.get("demand_commute_evening", 0),
+            "demand_night": temporal.get("demand_night", 0),
+            "temporal_reason": temporal.get("temporal_reason", ""),
+            "temporal_mult": temporal_mult,
+            "temporal_applied": True,
         })
         
     # Rainy condition safety guard: Cup Ramen weather multiplier can NEVER exceed Umbrella weather multiplier

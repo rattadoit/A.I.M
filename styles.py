@@ -565,5 +565,41 @@ def load_custom_css():
         color: #065f46;
         line-height: 1.6;
     }
+
+    /* 시간·요일 파이프라인 */
+    .temporal-pipeline-card { padding: 18px 22px !important; margin-bottom: 20px !important; }
+    .temporal-pipeline-steps {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .pipeline-step {
+        background: rgba(139, 92, 246, 0.08);
+        border: 1px solid rgba(139, 92, 246, 0.2);
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #4c1d95;
+    }
+    .pipeline-step .step-num {
+        display: inline-block;
+        background: #8b5cf6;
+        color: #fff;
+        width: 20px;
+        height: 20px;
+        line-height: 20px;
+        text-align: center;
+        border-radius: 50%;
+        font-size: 0.72rem;
+        margin-right: 6px;
+    }
+    .pipeline-arrow {
+        color: #94a3b8;
+        font-weight: 700;
+        font-size: 1rem;
+    }
     </style>
     """, unsafe_allow_html=True)
