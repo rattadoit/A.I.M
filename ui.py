@@ -182,44 +182,30 @@ def render_product_table(forecast_df, date_str, store_id):
     st.write("")
     
     # Propose SQLite submit button
-    submit_col1, submit_col2 = st.columns([3, 7])
-    
-    with submit_col1:
-        if st.button("🔥 최종 발주 수량 확정 및 피드백 전송", use_container_width=True, type="primary"):
-            # Write adjustments to SQLite
-            for _, row in display_df.iterrows():
-                p_id = row["id"]
-                p_name = row["name"]
-                
-                predicted_sales = float(row["expected_sales"])
-                safety_stock = int(row["safety_stock"])
-                current_stock = int(row["current_stock"])
-                rec_order = int(row["recommended_order"])
-                adj_order = int(st.session_state.adjusted_order[p_id])
-                
-                save_recommendation_feedback(
-                    date_str=date_str,
-                    store_id=store_id,
-                    product_id=p_id,
-                    predicted_sales=predicted_sales,
-                    safety_stock=safety_stock,
-                    current_stock=current_stock,
-                    recommended_order=rec_order,
-                    adjusted_order=adj_order
-                )
-                
-            st.success("✅ 최종 발주가 성공적으로 접수되었습니다. (SQLite DB 기록 및 피드백 누적 완료)")
+    if st.button("🔥 최종 발주 수량 확정 및 피드백 전송", use_container_width=True, type="primary"):
+        # Write adjustments to SQLite
+        for _, row in display_df.iterrows():
+            p_id = row["id"]
+            p_name = row["name"]
             
-            with st.expander("🤖 AI 모델 피드백 반영 시뮬레이션 로그", expanded=True):
-                st.code(f"""
-[12:00:00] [Feedback Loop] 점주 수동 수정 이력 저장 완료: {date_str} / Store: {store_id}
-[12:00:01] [Feedback Loop] AI 추천 대비 점주 수정 변동 항목 분석 완료.
-[12:00:02] [Feedback Loop] 실제 판매량 추적이 이루어진 후, 본 수정 오차(Deviation)를 가중치 손실 함수(Loss Function)로 피딩합니다.
-[12:00:03] [Feedback Loop] {store_id} 점포의 예측 편향성(Bias) 보정이 다음 모델 학습 사이클에 예약되었습니다.
-                """)
-                
-    with submit_col2:
-        st.info("💡 **피드백 루프 작동 원리**: AI 추천 수량과 다르게 입력된 점주의 최종 발주량 수치는 SQLite DB로 자동 적재되며, 실제 판매 데이터와 결합되어 점주 고유의 발주 보정 성향 및 오차 패턴을 재학습하는 파이프라인의 핵심 데이터로 수집됩니다.")
+            predicted_sales = float(row["expected_sales"])
+            safety_stock = int(row["safety_stock"])
+            current_stock = int(row["current_stock"])
+            rec_order = int(row["recommended_order"])
+            adj_order = int(st.session_state.adjusted_order[p_id])
+            
+            save_recommendation_feedback(
+                date_str=date_str,
+                store_id=store_id,
+                product_id=p_id,
+                predicted_sales=predicted_sales,
+                safety_stock=safety_stock,
+                current_stock=current_stock,
+                recommended_order=rec_order,
+                adjusted_order=adj_order
+            )
+            
+        st.success("✅ 최종 발주가 성공적으로 접수되었습니다. (SQLite DB 기록 및 피드백 누적 완료)")
 
 def render_chart(forecast_df):
     st.markdown('<div class="sec-title">📊 실시간 기상/상권 피처 반응 시각화</div>', unsafe_allow_html=True)
@@ -235,32 +221,17 @@ def render_chart(forecast_df):
         curr = row["expected_sales"]
         pct = int(round(((curr - base) / base) * 100))
         if pct > 0:
-            delta_texts.append(f" {curr:.1f}개 (+{pct}% ▲)")
+            delta_texts.append(f"+{pct}% ▲")
         elif pct < 0:
-            delta_texts.append(f" {curr:.1f}개 ({pct}% ▼)")
+            delta_texts.append(f"{pct}% ▼")
         else:
-            delta_texts.append(f" {curr:.1f}개 (0%)")
+            delta_texts.append("0%")
             
     chart_df["delta_text"] = delta_texts
     
     fig = go.Figure()
     
-    # 1. Add scatter mark for Normal Baseline Sales (gray vertical ticks)
-    fig.add_trace(go.Scatter(
-        y=chart_df["name"],
-        x=chart_df["base_sales"],
-        mode='markers',
-        name='평시 기준 수요',
-        marker=dict(
-            symbol='line-ns-open',
-            size=16,
-            color='#64748b',
-            line=dict(width=3, color='#475569')
-        ),
-        hovertemplate="<b>%{y}</b><br>평시 기준수요: <b>%{x}개</b><extra></extra>"
-    ))
-    
-    # 2. Add bar for AI Expected Sales (Teal color) - continuously sliding floats
+    # 1. Add bar for AI Expected Sales (Teal color) - continuously sliding floats
     fig.add_trace(go.Bar(
         y=chart_df["name"],
         x=chart_df["expected_sales"],
@@ -272,46 +243,46 @@ def render_chart(forecast_df):
         ),
         text=chart_df["delta_text"],
         textposition='outside',
-        textfont=dict(color='#0f172a', size=10, family='Inter', weight='bold'),
+        textfont=dict(color='#0f172a', size=9, family='Inter', weight='bold'),
         hovertemplate="<b>%{y}</b><br>AI 예상수요: <b>%{x:.1f}개</b><extra></extra>"
     ))
     
-    # 3. Add bar for AI Recommended Orders (Violet color)
+    # 2. Add bar for Normal Baseline Sales (Slate/Gray color)
     fig.add_trace(go.Bar(
         y=chart_df["name"],
-        x=chart_df["recommended_order"],
-        name="최적 추천 발주량",
+        x=chart_df["base_sales"],
+        name="평시 기준 수요",
         orientation='h',
         marker=dict(
-            color='#8b5cf6', # purple/violet
-            line=dict(color='rgba(139, 92, 246, 0.2)', width=1)
+            color='#94a3b8', # slate gray
+            line=dict(color='rgba(148, 163, 184, 0.2)', width=1)
         ),
-        text=chart_df["recommended_order"].apply(lambda x: f" {x}개"),
+        text=chart_df["base_sales"].apply(lambda x: f"{x}개"),
         textposition='outside',
-        textfont=dict(color='#6d28d9', size=10, family='Inter', weight='bold'),
-        hovertemplate="<b>%{y}</b><br>추천 발주량: <b>%{x}개</b><extra></extra>"
+        textfont=dict(color='#475569', size=9, family='Inter', weight='bold'),
+        hovertemplate="<b>%{y}</b><br>평시 기준수요: <b>%{x}개</b><extra></extra>"
     ))
     
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         barmode='group', # Grouped bars side-by-side
-        bargap=0.18,      # Gap between product groups
-        bargroupgap=0.05, # Gap between bars in a group
+        bargap=0.22,      # Gap between product groups
+        bargroupgap=0.08, # Gap between bars in a group
         xaxis=dict(
             title=dict(text="수량 (개)", font=dict(color='#475569', size=11)),
             tickfont=dict(color='#475569', size=10),
             gridcolor='#e2e8f0', # slate grid line for light mode readability
             zerolinecolor='#cbd5e1',
             side='bottom',
-            range=[0, max(chart_df["expected_sales"].max(), chart_df["recommended_order"].max()) * 1.25] # make room for tags
+            range=[0, max(chart_df["expected_sales"].max(), chart_df["base_sales"].max()) * 1.25] # make room for tags
         ),
         yaxis=dict(
             tickfont=dict(color='#0f172a', size=11, family='Inter', weight='bold'),
             gridcolor='rgba(0,0,0,0)'
         ),
         margin=dict(l=85, r=45, t=10, b=40),
-        height=380,
+        height=480,
         showlegend=True,
         legend=dict(
             font=dict(color='#0f172a', size=10),
@@ -324,9 +295,7 @@ def render_chart(forecast_df):
         dragmode=False
     )
         
-    render_html('<div class="glass-card" style="padding: 16px;">')
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    render_html('</div>')
 
 def render_reasoning(forecast_df):
     st.markdown('<div class="sec-title">🧠 AI 발주 판단 세부 근거 (Decision Reasoning)</div>', unsafe_allow_html=True)

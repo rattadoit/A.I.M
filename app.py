@@ -81,17 +81,17 @@ def main():
             # Interactive Grid with Owner adjustment & database save trigger
             render_product_table(forecast_df, date_str, store_id)
             
+            st.write("") # Spacer
+            
+            # Dynamic Heuristic & ML summary text generator
+            render_executive_report(forecast_df, weather, store_name, district, temp)
+            
         with col_right:
             # Top order suggestions bar charts
             render_chart(forecast_df)
             
             # Decision heuristics detail log
             render_reasoning(forecast_df)
-            
-        st.write("")
-        
-        # Dynamic Heuristic & ML summary text generator
-        render_executive_report(forecast_df, weather, store_name, district, temp)
         
     with tab2:
         # Render database log metrics and correlation scatterplots
