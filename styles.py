@@ -393,9 +393,12 @@ def load_custom_css():
         background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%) !important;
         color: #ffffff !important;
         border: none !important;
-        padding: 8px 20px !important;
+        padding: 12px 20px !important;
+        min-height: 56px !important;
         border-radius: 10px !important;
         font-weight: 600 !important;
+        white-space: pre-line !important;
+        line-height: 1.45 !important;
         box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15) !important;
         transition: all 0.2s ease !important;
     }
@@ -417,6 +420,150 @@ def load_custom_css():
         color: #8b5cf6 !important;
         font-weight: 700 !important;
         border-bottom: 2px solid #8b5cf6 !important;
+    }
+
+    /* ── 발주 이상치 경고 팝업 (Glassmorphism Modal) ── */
+    [data-testid="stDialog"] {
+        background: rgba(255, 255, 255, 0.92) !important;
+        backdrop-filter: blur(20px) !important;
+        -webkit-backdrop-filter: blur(20px) !important;
+        border: 1px solid rgba(139, 92, 246, 0.35) !important;
+        border-radius: 20px !important;
+        box-shadow: 0 24px 64px rgba(109, 40, 217, 0.18), 0 0 0 1px rgba(255,255,255,0.6) inset !important;
+    }
+    [data-testid="stDialog"] h2 {
+        font-family: 'Outfit', sans-serif !important;
+        color: #7c2d12 !important;
+        font-weight: 800 !important;
+    }
+    .anomaly-modal-desc {
+        font-size: 0.95rem;
+        color: #475569;
+        line-height: 1.65;
+        margin: 0 0 16px 0;
+    }
+    .anomaly-items-list {
+        max-height: 420px;
+        overflow-y: auto;
+        padding-right: 4px;
+    }
+    .anomaly-item-card {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(226, 232, 240, 0.9);
+        border-radius: 14px;
+        padding: 16px 18px;
+        margin-bottom: 12px;
+        box-shadow: 0 4px 16px rgba(148, 163, 184, 0.08);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .anomaly-item-card:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 24px rgba(148, 163, 184, 0.12);
+    }
+    .anomaly-item-card.severity-low {
+        border-left: 4px solid #eab308;
+        background: linear-gradient(135deg, rgba(254, 249, 195, 0.35) 0%, rgba(255,255,255,0.9) 100%);
+    }
+    .anomaly-item-card.severity-medium {
+        border-left: 4px solid #f97316;
+        background: linear-gradient(135deg, rgba(255, 237, 213, 0.4) 0%, rgba(255,255,255,0.9) 100%);
+    }
+    .anomaly-item-card.severity-high {
+        border-left: 4px solid #ef4444;
+        background: linear-gradient(135deg, rgba(254, 226, 226, 0.45) 0%, rgba(255,255,255,0.9) 100%);
+    }
+    .anomaly-item-card.fresh-food-card {
+        border: 1px solid rgba(239, 68, 68, 0.45);
+        border-left: 4px solid #ef4444;
+        background: linear-gradient(135deg, rgba(255, 228, 230, 0.55) 0%, rgba(255, 241, 242, 0.85) 100%);
+        box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.12), 0 8px 28px rgba(239, 68, 68, 0.12);
+        animation: ff-pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes ff-pulse {
+        0%, 100% { box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.12), 0 8px 28px rgba(239, 68, 68, 0.10); }
+        50% { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18), 0 12px 32px rgba(239, 68, 68, 0.18); }
+    }
+    .anomaly-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    .anomaly-product-name {
+        font-family: 'Outfit', sans-serif;
+        font-weight: 700;
+        font-size: 1rem;
+        color: #0f172a;
+    }
+    .anomaly-severity-tag {
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 4px 10px;
+        border-radius: 20px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .anomaly-severity-tag.severity-low { background: #fef9c3; color: #a16207; border: 1px solid #fde047; }
+    .anomaly-severity-tag.severity-medium { background: #ffedd5; color: #c2410c; border: 1px solid #fdba74; }
+    .anomaly-severity-tag.severity-high { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+    .anomaly-badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .anomaly-badge {
+        font-size: 0.68rem;
+        font-weight: 700;
+        padding: 3px 9px;
+        border-radius: 6px;
+        letter-spacing: 0.4px;
+    }
+    .anomaly-badge.ff-badge {
+        background: rgba(239, 68, 68, 0.12);
+        color: #b91c1c;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .anomaly-badge.waste-badge {
+        background: rgba(219, 39, 119, 0.1);
+        color: #be185d;
+        border: 1px solid rgba(219, 39, 119, 0.25);
+    }
+    .anomaly-stats {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        font-size: 0.88rem;
+        color: #334155;
+    }
+    .anomaly-stats b { color: #0f172a; }
+    .diff-low { color: #a16207 !important; }
+    .diff-medium { color: #c2410c !important; }
+    .diff-high { color: #b91c1c !important; }
+    .anomaly-ff-notice {
+        margin: 10px 0 0 0;
+        font-size: 0.82rem;
+        color: #b91c1c;
+        font-weight: 600;
+        line-height: 1.5;
+    }
+
+    /* 발주 확정 성공 배너 */
+    .feedback-success-banner {
+        background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+        border: 1px solid #6ee7b7;
+        border-radius: 14px;
+        padding: 20px 28px;
+        margin: 12px 0 4px 0;
+        box-shadow: 0 4px 16px rgba(16, 185, 129, 0.08);
+    }
+    .feedback-success-title {
+        font-family: 'Outfit', sans-serif;
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #047857;
+        line-height: 1.5;
+        margin-bottom: 6px;
+    }
+    .feedback-success-desc {
+        font-size: 0.92rem;
+        color: #065f46;
+        line-height: 1.6;
     }
     </style>
     """, unsafe_allow_html=True)

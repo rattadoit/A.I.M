@@ -13,7 +13,8 @@ from ui import (
     render_reasoning,
     render_executive_report,
     render_feedback_analysis_tab,
-    render_footer
+    render_footer,
+    init_order_session_state,
 )
 
 # 1. Streamlit Caching for Prediction Engine (prevents retraining on every widget slide!)
@@ -29,6 +30,9 @@ def main():
     
     # 3. Inject Glassmorphic CSS Styling
     load_custom_css()
+
+    # 발주 이상치 팝업 session_state 선초기화
+    init_order_session_state()
     
     # 4. Initialize ML Engine
     try:

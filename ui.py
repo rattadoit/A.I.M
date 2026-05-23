@@ -4,6 +4,159 @@ import pandas as pd
 import plotly.graph_objects as go
 from config import WEATHER_OPTIONS, DISTRICT_OPTIONS
 from database import save_recommendation_feedback, get_feedback_history, get_feedback_metrics
+from validation import detect_order_anomalies, FRESH_FOOD_CATEGORY_LABEL
+
+
+def init_order_session_state():
+    """발주 확정·이상치 팝업 관련 session_state 초기화."""
+    if "show_warning_modal" not in st.session_state:
+        st.session_state.show_warning_modal = False
+    if "pending_order_payload" not in st.session_state:
+        st.session_state.pending_order_payload = None
+    if "anomaly_items" not in st.session_state:
+        st.session_state.anomaly_items = None
+    if "order_submit_success" not in st.session_state:
+        st.session_state.order_submit_success = False
+
+
+def _build_order_items(forecast_df):
+    """이상치 탐지용 발주 비교 데이터 생성."""
+    items = []
+    for _, row in forecast_df.iterrows():
+        items.append({
+            "product_id": row["id"],
+            "product": row["name"],
+            "category": row["category"],
+            "shelf_life_type": row.get("shelf_life_type", ""),
+            "predicted": int(row["recommended_order"]),
+            "actual": int(st.session_state.adjusted_order[row["id"]]),
+            "predicted_sales": float(row["expected_sales"]),
+            "safety_stock": int(row["safety_stock"]),
+            "current_stock": int(row["current_stock"]),
+            "recommended_order": int(row["recommended_order"]),
+            "adjusted_order": int(st.session_state.adjusted_order[row["id"]]),
+        })
+    return items
+
+
+def _build_save_payload(forecast_df, date_str, store_id):
+    """SQLite 저장용 페이로드 생성."""
+    payload = []
+    for _, row in forecast_df.iterrows():
+        p_id = row["id"]
+        payload.append({
+            "date_str": date_str,
+            "store_id": store_id,
+            "product_id": p_id,
+            "predicted_sales": float(row["expected_sales"]),
+            "safety_stock": int(row["safety_stock"]),
+            "current_stock": int(row["current_stock"]),
+            "recommended_order": int(row["recommended_order"]),
+            "adjusted_order": int(st.session_state.adjusted_order[p_id]),
+        })
+    return payload
+
+
+def _persist_order_feedback(payload):
+    """확정된 발주 피드백을 SQLite에 저장."""
+    for item in payload:
+        save_recommendation_feedback(
+            date_str=item["date_str"],
+            store_id=item["store_id"],
+            product_id=item["product_id"],
+            predicted_sales=item["predicted_sales"],
+            safety_stock=item["safety_stock"],
+            current_stock=item["current_stock"],
+            recommended_order=item["recommended_order"],
+            adjusted_order=item["adjusted_order"],
+        )
+    st.session_state.order_submit_success = True
+    st.session_state.show_warning_modal = False
+    st.session_state.pending_order_payload = None
+    st.session_state.anomaly_items = None
+
+
+def _severity_label(severity):
+    return {"low": "Low", "medium": "Medium", "high": "High"}.get(severity, "Low")
+
+
+
+def _render_anomaly_items_html(anomaly_items):
+    """팝업 내부 이상치 상품 카드 HTML 생성."""
+    cards = []
+    for item in anomaly_items:
+        is_ff = item.get("fresh_food_warning") or item.get("category") == FRESH_FOOD_CATEGORY_LABEL
+        card_class = "anomaly-item-card fresh-food-card" if is_ff else f"anomaly-item-card severity-{item['severity']}"
+        diff_sign = "+" if item["diff_percent"] > 0 else ""
+        ff_badges = ""
+        if is_ff:
+            ff_badges = """
+                <span class="anomaly-badge ff-badge">FRESH FOOD</span>
+                <span class="anomaly-badge waste-badge">폐기 고위험</span>
+            """
+        ff_notice = ""
+        if is_ff and item["absolute_diff"] > 0:
+            ff_notice = """
+                <p class="anomaly-ff-notice">
+                    ⚠ 신선식품은 폐기 위험이 높아 과다 발주에 주의가 필요합니다.
+                </p>
+            """
+        icon = "🍱" if is_ff else "📦"
+        cards.append(f"""
+        <div class="{card_class}">
+            <div class="anomaly-item-header">
+                <span class="anomaly-product-name">{icon} {item["product"]}</span>
+                <span class="anomaly-severity-tag severity-{item["severity"]}">{_severity_label(item["severity"])}</span>
+            </div>
+            <div class="anomaly-badge-row">{ff_badges}</div>
+            <div class="anomaly-stats">
+                <span>예측: <b>{item["predicted"]}개</b></span>
+                <span>입력: <b>{item["actual"]}개</b></span>
+                <span>차이: <b class="diff-{item["severity"]}">{diff_sign}{item["diff_percent"]:.0f}%</b></span>
+            </div>
+            {ff_notice}
+        </div>
+        """)
+    return "".join(cards)
+
+
+@st.dialog("⚠ 발주량 차이가 큽니다", width="large")
+def render_anomaly_warning_dialog():
+    """Glassmorphism 경고 팝업 — 이상치 발주 확인 후 저장 여부 결정."""
+    anomaly_items = st.session_state.get("anomaly_items") or []
+
+    render_html("""
+    <div class="anomaly-modal-body">
+        <p class="anomaly-modal-desc">
+            AI 예측 대비 큰 차이가 있는 상품이 발견되었습니다.<br>
+            실제 발주를 진행하시겠습니까?
+        </p>
+    </div>
+    """)
+
+    render_html(f"""
+    <div class="anomaly-items-list">
+        {_render_anomaly_items_html(anomaly_items)}
+    </div>
+    """)
+
+    st.write("")
+    btn_col1, btn_col2 = st.columns(2)
+
+    with btn_col1:
+        if st.button("✏️ 수정하기", use_container_width=True, key="anomaly_edit_btn"):
+            st.session_state.show_warning_modal = False
+            st.session_state.pending_order_payload = None
+            st.session_state.anomaly_items = None
+            st.rerun()
+
+    with btn_col2:
+        if st.button("✅ 그대로 발주", use_container_width=True, type="primary", key="anomaly_confirm_btn"):
+            payload = st.session_state.get("pending_order_payload")
+            if payload:
+                _persist_order_feedback(payload)
+            st.rerun()
+
 
 def render_html(html_str):
     cleaned = "".join([line.strip() for line in html_str.split("\n")])
@@ -159,6 +312,8 @@ def render_kpi(forecast_df):
         """)
 
 def render_product_table(forecast_df, date_str, store_id):
+    init_order_session_state()
+
     st.markdown('<div class="sec-title">📋 상품별 예측 상세 정보 및 발주 수량 조정</div>', unsafe_allow_html=True)
     
     # 1. Prepare display DataFrame for Streamlit Editor
@@ -209,32 +364,38 @@ def render_product_table(forecast_df, date_str, store_id):
         st.session_state.adjusted_order[p_id] = val
         
     st.write("")
-    
-    # Propose SQLite submit button
-    if st.button("🔥 최종 발주 수량 확정 및 피드백 전송", use_container_width=True, type="primary"):
-        # Write adjustments to SQLite
-        for _, row in display_df.iterrows():
-            p_id = row["id"]
-            p_name = row["name"]
-            
-            predicted_sales = float(row["expected_sales"])
-            safety_stock = int(row["safety_stock"])
-            current_stock = int(row["current_stock"])
-            rec_order = int(row["recommended_order"])
-            adj_order = int(st.session_state.adjusted_order[p_id])
-            
-            save_recommendation_feedback(
-                date_str=date_str,
-                store_id=store_id,
-                product_id=p_id,
-                predicted_sales=predicted_sales,
-                safety_stock=safety_stock,
-                current_stock=current_stock,
-                recommended_order=rec_order,
-                adjusted_order=adj_order
-            )
-            
-        st.success("✅ 최종 발주가 성공적으로 접수되었습니다. (SQLite DB 기록 및 피드백 누적 완료)")
+
+    # 발주 확정: 이상치 탐지 후 팝업 또는 즉시 저장
+    if st.button(
+        "🔥 최종 발주 수량 확정\n및 피드백 전송",
+        use_container_width=True,
+        type="primary",
+        key="submit_order_btn",
+    ):
+        st.session_state.order_submit_success = False
+        order_items = _build_order_items(display_df)
+        anomalies = detect_order_anomalies(order_items)
+
+        if anomalies:
+            st.session_state.anomaly_items = anomalies
+            st.session_state.pending_order_payload = _build_save_payload(display_df, date_str, store_id)
+            st.session_state.show_warning_modal = True
+        else:
+            _persist_order_feedback(_build_save_payload(display_df, date_str, store_id))
+
+    # 이상치 경고 팝업 표시
+    if st.session_state.get("show_warning_modal") and st.session_state.get("anomaly_items"):
+        render_anomaly_warning_dialog()
+
+    # 저장 성공 토스트
+    if st.session_state.get("order_submit_success"):
+        render_html("""
+        <div class="feedback-success-banner">
+            <div class="feedback-success-title">✅ 최종 발주가 성공적으로 접수되었습니다</div>
+            <div class="feedback-success-desc">SQLite DB 기록 및 피드백 누적이 완료되었습니다.</div>
+        </div>
+        """)
+        st.session_state.order_submit_success = False
 
 def render_chart(forecast_df):
     st.markdown('<div class="sec-title">📊 실시간 기상/상권 피처 반응 시각화</div>', unsafe_allow_html=True)
