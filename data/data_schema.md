@@ -29,6 +29,18 @@
 | **store_name** | VARCHAR(50) | Not Null | 점포명 | `"마포대학가점"` |
 | **trade_area_type** | VARCHAR(10) | Not Null | 상권 유형 (`학교`, `오피스`, `주거지`) | `"학교"` |
 | **region** | VARCHAR(20) | Not Null | 행정구역 (날씨 매칭용) | `"서울"` |
+| **latitude** | FLOAT | Prototype | 샘플 점포 위도 (실제 GPS 연동 전 테스트용) | `37.5584` |
+| **longitude** | FLOAT | Prototype | 샘플 점포 경도 (실제 GPS 연동 전 테스트용) | `126.9459` |
+| **address** | VARCHAR(100) | Prototype | 샘플 점포 주소 | `"서울시 서대문구 대학가 인근"` |
+| **school_count** | INTEGER | Prototype | 점포 반경 내 학교 수 샘플 값 | `6` |
+| **hospital_count** | INTEGER | Prototype | 점포 반경 내 병원 수 샘플 값 | `1` |
+| **office_count** | INTEGER | Prototype | 점포 반경 내 오피스 수 샘플 값 | `5` |
+| **subway_distance** | INTEGER | Prototype | 가장 가까운 지하철역까지 거리(m) 샘플 값 | `280` |
+| **commercial_density** | FLOAT | Prototype | 주변 상업시설 밀도 지수 샘플 값 (0~1) | `0.72` |
+| **residential_ratio** | FLOAT | Prototype | 주변 주거지역 비율 샘플 값 (0~1) | `0.38` |
+| **store_area_type** | VARCHAR(20) | Prototype | 위치 기반 세분화 상권 유형 샘플 값 | `"대학가"` |
+
+> 현재 프로토타입은 실제 GPS 권한 요청, 지도 API, 지오코딩, 주변 시설 검색 API를 사용하지 않습니다. 위 위치 기반 컬럼은 CSV에 저장된 샘플 피처이며, 향후 GPS 연동 시 같은 컬럼 구조에 실제 계산값을 채우는 방식으로 확장합니다.
 
 ---
 

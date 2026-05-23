@@ -9,6 +9,30 @@ def render_html(html_str):
     cleaned = "".join([line.strip() for line in html_str.split("\n")])
     st.markdown(cleaned, unsafe_allow_html=True)
 
+def render_store_location_profile(store_row):
+    """Shows prototype location features without requiring live GPS integration."""
+    st.markdown("---")
+    st.subheader("📍 샘플 위치 피처")
+
+    address = store_row.get("address", "샘플 주소 없음")
+    area_type = store_row.get("store_area_type", store_row.get("trade_area_type", "일반상권"))
+    latitude = float(store_row.get("latitude", 0.0))
+    longitude = float(store_row.get("longitude", 0.0))
+
+    st.caption("실제 GPS/API 연동 전 단계로, CSV에 저장된 샘플 위치 피처를 사용합니다.")
+    st.markdown(f"**{area_type}** · {address}")
+    st.caption(f"샘플 좌표: {latitude:.4f}, {longitude:.4f}")
+
+    loc_col1, loc_col2 = st.columns(2)
+    with loc_col1:
+        st.metric("학교", f"{int(store_row.get('school_count', 0))}곳")
+        st.metric("오피스", f"{int(store_row.get('office_count', 0))}곳")
+        st.metric("상업밀도", f"{float(store_row.get('commercial_density', 0.0)):.2f}")
+    with loc_col2:
+        st.metric("병원", f"{int(store_row.get('hospital_count', 0))}곳")
+        st.metric("지하철", f"{int(store_row.get('subway_distance', 0))}m")
+        st.metric("주거비율", f"{float(store_row.get('residential_ratio', 0.0)):.2f}")
+
 def render_sidebar(store_df):
     with st.sidebar:
         st.markdown('<div style="text-align: center; padding: 10px 0;"><h3 style="font-family: \'Outfit\', sans-serif; color: #0f172a; margin-bottom: 5px;">🏪 AI Smart Order</h3><p style="color: #6d28d9; font-size: 0.82rem; font-weight: 600;">데이터 기반 수요예측 & 자동 발주</p></div>', unsafe_allow_html=True)
@@ -17,7 +41,10 @@ def render_sidebar(store_df):
         st.subheader("⚙️ 상권 및 점포 설정")
         
         # Store selection
-        store_options = {row["store_id"]: f"{row['store_name']} ({row['trade_area_type']})" for _, row in store_df.iterrows()}
+        store_options = {
+            row["store_id"]: f"{row['store_name']} ({row.get('store_area_type', row['trade_area_type'])})"
+            for _, row in store_df.iterrows()
+        }
         selected_store_id = st.selectbox(
             "📍 대상 점포 선택",
             options=list(store_options.keys()),
@@ -26,6 +53,7 @@ def render_sidebar(store_df):
         
         selected_store_row = store_df[store_df["store_id"] == selected_store_id].iloc[0]
         district = selected_store_row["trade_area_type"]
+        render_store_location_profile(selected_store_row)
         
         st.markdown("---")
         st.subheader("⛅ 외부 환경 시뮬레이터")
@@ -69,12 +97,13 @@ def render_sidebar(store_df):
         
     return selected_store_id, weather, temp, humidity, rainfall, is_rainy, target_date.strftime("%Y-%m-%d")
 
-def render_header(date_str, store_name, weather, district, temp):
+def render_header(date_str, store_name, weather, district, temp, store_area_type=None):
+    area_text = f"{district} / {store_area_type}" if store_area_type else district
     render_html(f"""
     <div class="header-container">
         <span class="badge-ai">AI SMART ORDER MVP</span>
         <h1 class="main-title">🏪 {store_name} 스마트 발주 추천</h1>
-        <p class="subtitle">분석일자: <b>{date_str}</b> | 날씨: <b>{weather} ({temp}℃)</b> | 상권 특성: <b>{district}</b></p>
+        <p class="subtitle">분석일자: <b>{date_str}</b> | 날씨: <b>{weather} ({temp}℃)</b> | 상권 특성: <b>{area_text}</b></p>
     </div>
     """)
 

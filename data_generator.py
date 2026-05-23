@@ -4,6 +4,41 @@ import datetime
 import pandas as pd
 import numpy as np
 
+def calculate_location_multiplier(product_name, category, store):
+    """Returns a prototype demand multiplier from sample location features."""
+    school_count = store.get("school_count", 0)
+    hospital_count = store.get("hospital_count", 0)
+    office_count = store.get("office_count", 0)
+    subway_distance = store.get("subway_distance", 800)
+    commercial_density = store.get("commercial_density", 0.5)
+    residential_ratio = store.get("residential_ratio", 0.5)
+
+    multiplier = 1.0
+
+    # Dense foot traffic lifts impulse-buy items across the board.
+    multiplier += commercial_density * 0.08
+    if subway_distance <= 250:
+        multiplier += 0.08
+    elif subway_distance <= 500:
+        multiplier += 0.04
+
+    if product_name in ["컵라면", "샌드위치", "아이스크림", "핫바"]:
+        multiplier += min(school_count * 0.025, 0.18)
+
+    if product_name in ["아메리카노", "도시락", "샌드위치"]:
+        multiplier += min(office_count * 0.012, 0.22)
+
+    if product_name in ["생수", "도시락", "아메리카노"]:
+        multiplier += min(hospital_count * 0.018, 0.12)
+
+    if product_name in ["맥주", "핫바", "도시락", "컵라면"]:
+        multiplier += residential_ratio * 0.12
+
+    if category == "음료":
+        multiplier += commercial_density * 0.04
+
+    return round(multiplier, 3)
+
 def generate_synthesized_data():
     print("Generating simulated convenience store datasets...")
     
@@ -27,9 +62,54 @@ def generate_synthesized_data():
     
     # 3. Store Master Data (store_info)
     stores = [
-        {"store_id": "S001", "store_name": "대학가 학생점", "trade_area_type": "학교", "region": "서울"},
-        {"store_id": "S002", "store_name": "여의도 금융가점", "trade_area_type": "오피스", "region": "서울"},
-        {"store_id": "S003", "store_name": "마포래미안 주거점", "trade_area_type": "주거지", "region": "서울"},
+        {
+            "store_id": "S001",
+            "store_name": "대학가 학생점",
+            "trade_area_type": "학교",
+            "region": "서울",
+            "latitude": 37.5584,
+            "longitude": 126.9459,
+            "address": "서울시 서대문구 대학가 인근",
+            "school_count": 6,
+            "hospital_count": 1,
+            "office_count": 5,
+            "subway_distance": 280,
+            "commercial_density": 0.72,
+            "residential_ratio": 0.38,
+            "store_area_type": "대학가",
+        },
+        {
+            "store_id": "S002",
+            "store_name": "여의도 금융가점",
+            "trade_area_type": "오피스",
+            "region": "서울",
+            "latitude": 37.5259,
+            "longitude": 126.9245,
+            "address": "서울시 영등포구 여의도 업무지구",
+            "school_count": 1,
+            "hospital_count": 2,
+            "office_count": 22,
+            "subway_distance": 180,
+            "commercial_density": 0.91,
+            "residential_ratio": 0.18,
+            "store_area_type": "오피스밀집",
+        },
+        {
+            "store_id": "S003",
+            "store_name": "마포래미안 주거점",
+            "trade_area_type": "주거지",
+            "region": "서울",
+            "latitude": 37.5519,
+            "longitude": 126.9134,
+            "address": "서울시 마포구 대단지 아파트 인근",
+            "school_count": 3,
+            "hospital_count": 3,
+            "office_count": 4,
+            "subway_distance": 620,
+            "commercial_density": 0.56,
+            "residential_ratio": 0.82,
+            "store_area_type": "주거밀집",
+        },
     ]
     pd.DataFrame(stores).to_csv("data/sample_store.csv", index=False, encoding="utf-8-sig")
     
@@ -187,7 +267,8 @@ def generate_synthesized_data():
                         weekend_mult = 1.2
                 
                 # Compute base expected sales
-                expected = base * w_mult * d_mult * weekend_mult
+                location_mult = calculate_location_multiplier(p_name, category, store)
+                expected = base * w_mult * d_mult * weekend_mult * location_mult
                 
                 # Add Gaussian noise
                 noise = np.random.normal(0, max(1.5, expected * 0.12))

@@ -45,6 +45,7 @@ def main():
     store_row = engine.store_df[engine.store_df["store_id"] == store_id].iloc[0]
     store_name = store_row["store_name"]
     district = store_row["trade_area_type"]
+    store_area_type = store_row.get("store_area_type", district)
     
     # 6. Execute Dual Prediction Core
     forecast_df = get_integrated_forecast(
@@ -67,7 +68,7 @@ def main():
     
     with tab1:
         # Header Rendering
-        render_header(date_str, store_name, weather, district, temp)
+        render_header(date_str, store_name, weather, district, temp, store_area_type)
         
         # Metric Rows
         render_kpi(forecast_df)

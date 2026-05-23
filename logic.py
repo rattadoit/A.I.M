@@ -1,8 +1,6 @@
 import os
-import random
 import datetime
 import pandas as pd
-import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
 from config import BASELINE_PRODUCTS
@@ -13,14 +11,37 @@ STORE_CSV = "data/sample_store.csv"
 WEATHER_CSV = "data/sample_weather.csv"
 SALES_CSV = "data/sample_sales.csv"
 
+LOCATION_DEFAULTS = {
+    "latitude": 37.5665,
+    "longitude": 126.9780,
+    "address": "서울시 샘플 주소",
+    "school_count": 0,
+    "hospital_count": 0,
+    "office_count": 0,
+    "subway_distance": 800,
+    "commercial_density": 0.5,
+    "residential_ratio": 0.5,
+    "store_area_type": "일반상권",
+}
+
+LOCATION_NUMERIC_FEATURES = [
+    "school_count",
+    "hospital_count",
+    "office_count",
+    "subway_distance",
+    "commercial_density",
+    "residential_ratio",
+]
+
 class PredictionEngine:
     def __init__(self):
         self.model = None
         self.label_encoders = {}
         self.feature_cols = [
-            "temp", "humidity", "rainy", "rainfall", 
+            "temperature", "humidity", "rainy", "rainfall",
             "day_of_week", "is_weekend",
-            "cat_encoded", "dist_encoded", "prod_encoded",
+            "cat_encoded", "dist_encoded", "area_encoded", "prod_encoded",
+            *LOCATION_NUMERIC_FEATURES,
             "recent_7d_avg", "recent_4w_weekday_avg"
         ]
         self.sales_df = None
@@ -40,10 +61,26 @@ class PredictionEngine:
         self.store_df = pd.read_csv(STORE_CSV)
         self.weather_df = pd.read_csv(WEATHER_CSV)
         self.sales_df = pd.read_csv(SALES_CSV)
+
+        self.store_df = self.ensure_location_features(self.store_df)
         
         # Parse dates
         self.sales_df["date"] = pd.to_datetime(self.sales_df["date"])
         self.weather_df["date"] = pd.to_datetime(self.weather_df["date"])
+
+    def ensure_location_features(self, store_df):
+        """Adds prototype location columns when older sample data is loaded."""
+        df = store_df.copy()
+        for col, default in LOCATION_DEFAULTS.items():
+            if col not in df.columns:
+                df[col] = default
+
+        for col in LOCATION_NUMERIC_FEATURES:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(LOCATION_DEFAULTS[col])
+
+        df["store_area_type"] = df["store_area_type"].fillna(LOCATION_DEFAULTS["store_area_type"]).astype(str)
+        df["address"] = df["address"].fillna(LOCATION_DEFAULTS["address"]).astype(str)
+        return df
         
     def engineer_features(self):
         """Engineers rolling historical averages and encoders for Random Forest training."""
@@ -74,7 +111,12 @@ class PredictionEngine:
         df["recent_4w_weekday_avg"] = df["recent_4w_weekday_avg"].fillna(df["sales_qty"].mean())
         
         # 3. Label Encoding
-        for col, new_col in [("category", "cat_encoded"), ("trade_area_type", "dist_encoded"), ("product_id", "prod_encoded")]:
+        for col, new_col in [
+            ("category", "cat_encoded"),
+            ("trade_area_type", "dist_encoded"),
+            ("store_area_type", "area_encoded"),
+            ("product_id", "prod_encoded"),
+        ]:
             le = LabelEncoder()
             df[new_col] = le.fit_transform(df[col])
             self.label_encoders[col] = le
@@ -86,13 +128,7 @@ class PredictionEngine:
         self.load_data()
         df = self.engineer_features()
         
-        # Feature columns mapping
-        X = df[[
-            "temperature", "humidity", "rainy", "rainfall", 
-            "day_of_week", "is_weekend",
-            "cat_encoded", "dist_encoded", "prod_encoded",
-            "recent_7d_avg", "recent_4w_weekday_avg"
-        ]]
+        X = df[self.feature_cols]
         y = df["sales_qty"]
         
         # Standard RF setup
@@ -111,6 +147,7 @@ class PredictionEngine:
         
         store_row = self.store_df[self.store_df["store_id"] == store_id].iloc[0]
         district = store_row["trade_area_type"]
+        area_type = store_row["store_area_type"]
         
         predictions = []
         
@@ -121,6 +158,7 @@ class PredictionEngine:
             # Encode categories
             cat_enc = self.label_encoders["category"].transform([category])[0]
             dist_enc = self.label_encoders["trade_area_type"].transform([district])[0]
+            area_enc = self.label_encoders["store_area_type"].transform([area_type])[0]
             prod_enc = self.label_encoders["product_id"].transform([p_id])[0]
             
             # Fetch rolling history for this store/product up to the latest date
@@ -139,25 +177,90 @@ class PredictionEngine:
                 recent_7d = p["base_sales"]
                 recent_4w = p["base_sales"]
                 
-            # Features block
-            features = np.array([[
-                temp, humidity, is_rainy, rainfall,
-                day_of_week, is_weekend,
-                cat_enc, dist_enc, prod_enc,
-                recent_7d, recent_4w
-            ]])
+            feature_values = {
+                "temperature": temp,
+                "humidity": humidity,
+                "rainy": is_rainy,
+                "rainfall": rainfall,
+                "day_of_week": day_of_week,
+                "is_weekend": is_weekend,
+                "cat_encoded": cat_enc,
+                "dist_encoded": dist_enc,
+                "area_encoded": area_enc,
+                "prod_encoded": prod_enc,
+                "recent_7d_avg": recent_7d,
+                "recent_4w_weekday_avg": recent_4w,
+            }
+            for col in LOCATION_NUMERIC_FEATURES:
+                feature_values[col] = float(store_row[col])
+
+            features = pd.DataFrame([feature_values], columns=self.feature_cols)
             
             pred_qty = round(float(self.model.predict(features)[0]), 1)
             predictions.append((p_id, pred_qty))
             
         return dict(predictions)
 
-def calculate_rule_forecast(weather, district, day_of_week):
+def get_location_demand_factor(product_name, category, store_row):
+    """Computes a readable prototype demand factor from sample location features."""
+    school_count = float(store_row.get("school_count", 0))
+    hospital_count = float(store_row.get("hospital_count", 0))
+    office_count = float(store_row.get("office_count", 0))
+    subway_distance = float(store_row.get("subway_distance", 800))
+    commercial_density = float(store_row.get("commercial_density", 0.5))
+    residential_ratio = float(store_row.get("residential_ratio", 0.5))
+
+    factor = 1.0
+    reasons = []
+
+    commercial_bonus = commercial_density * 0.08
+    factor += commercial_bonus
+    if commercial_density >= 0.75:
+        reasons.append("상업시설 밀도 높음")
+
+    if subway_distance <= 250:
+        factor += 0.08
+        reasons.append("지하철 초근접")
+    elif subway_distance <= 500:
+        factor += 0.04
+        reasons.append("지하철 접근성 양호")
+
+    if product_name in ["컵라면", "샌드위치", "아이스크림", "핫바"]:
+        bonus = min(school_count * 0.025, 0.18)
+        factor += bonus
+        if school_count >= 3:
+            reasons.append("학교 밀집")
+
+    if product_name in ["아메리카노", "도시락", "샌드위치"]:
+        bonus = min(office_count * 0.012, 0.22)
+        factor += bonus
+        if office_count >= 10:
+            reasons.append("오피스 밀집")
+
+    if product_name in ["생수", "도시락", "아메리카노"]:
+        bonus = min(hospital_count * 0.018, 0.12)
+        factor += bonus
+        if hospital_count >= 3:
+            reasons.append("병원 접근성")
+
+    if product_name in ["맥주", "핫바", "도시락", "컵라면"]:
+        factor += residential_ratio * 0.12
+        if residential_ratio >= 0.65:
+            reasons.append("주거 배후수요")
+
+    if category == "음료":
+        factor += commercial_density * 0.04
+
+    reason = " + ".join(reasons)
+    return round(factor, 3), reason
+
+def calculate_rule_forecast(weather, store_row, day_of_week):
     """
     Computes baseline heuristic rule sales.
     Replicates the base sales heuristics from original code, adding weekend dampeners.
     """
     is_weekend = 1 if day_of_week >= 5 else 0
+    district = store_row["trade_area_type"]
     forecast_results = []
     
     for p in BASELINE_PRODUCTS:
@@ -254,7 +357,11 @@ def calculate_rule_forecast(weather, district, day_of_week):
             if district in ["오피스", "학교"]:
                 weekend_mult = 1.1
                 
-        expected_sales = round(p["base_sales"] * w_mult * d_mult * weekend_mult, 1)
+        location_mult, location_reason = get_location_demand_factor(p["name"], p["category"], store_row)
+        if location_reason:
+            reasons.append(f"샘플 위치 피처 반영: {location_reason} ({location_mult:.2f}x)")
+
+        expected_sales = round(p["base_sales"] * w_mult * d_mult * weekend_mult * location_mult, 1)
         reason_str = " + ".join(reasons) if reasons else "기본 안정 수요 흐름 유지"
         
         forecast_results.append({
@@ -263,6 +370,7 @@ def calculate_rule_forecast(weather, district, day_of_week):
             "reason": reason_str,
             "w_mult": w_mult,
             "d_mult": d_mult,
+            "location_mult": location_mult,
             "weekend_mult": weekend_mult
         })
         
@@ -372,7 +480,8 @@ def get_integrated_forecast(target_date_str, store_id, weather_label, temp, humi
     
     # 2. Get predictions from both engines
     ml_preds = engine.predict_ml_demand(target_date_str, store_id, weather_label, temp, humidity, rainfall, is_rainy)
-    rule_preds = calculate_rule_forecast(weather_label, engine.store_df[engine.store_df["store_id"] == store_id].iloc[0]["trade_area_type"], day_of_week)
+    store_row = engine.store_df[engine.store_df["store_id"] == store_id].iloc[0]
+    rule_preds = calculate_rule_forecast(weather_label, store_row, day_of_week)
     
     # 3. Default typical weather baseline settings to compute relative scaling multiplier
     if weather_label == "비":
